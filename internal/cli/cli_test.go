@@ -196,6 +196,8 @@ func TestUsageErrors(t *testing.T) {
 		{name: "empty value", args: []string{"config", "set", "api_key", ""}},
 		{name: "too many arguments", args: []string{"config", "show", "extra"}},
 		{name: "credits with an argument", args: []string{"credits", "show", "extra"}},
+		{name: "catalog show with an argument", args: []string{"catalog", "show", "extra"}},
+		{name: "catalog update with an argument", args: []string{"catalog", "update", "extra"}},
 		{name: "model list with an argument", args: []string{"model", "list", "extra"}},
 		{name: "model show without a model", args: []string{"model", "show"}},
 		{name: "model show with two models", args: []string{"model", "show", "a/one", "b/two"}},
@@ -233,6 +235,7 @@ func TestUsageListsEveryCommand(t *testing.T) {
 		t.Fatalf("no arguments: code %d, stderr %q", got.code, got.stderr)
 	}
 	want := []string{
+		"catalog update", "catalog show",
 		"config set <key> <value>", "config show", "credits show",
 		"file upload <path|url>",
 		"model list [--category <name>] [--vendor <name>]", "model show <model-id>",

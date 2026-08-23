@@ -26,9 +26,9 @@ keeps a local ledger of everything it sent.
   schemas are derived from the OpenAPI specifications embedded in the kie.ai
   documentation, so new models can be picked up without hand-written definitions.
 - **A single binary.** Written in Go, with the catalog baked in, so every model
-  resolves with no network at all. The baked-in catalog records the day it was
-  generated, and a binary carrying one older than 90 days says so. Updating the
-  catalog is an explicit command; nothing is fetched behind your back.
+  resolves with no network at all. The catalog records the day it was generated,
+  and one older than 90 days says so. Updating the catalog is an explicit
+  command; nothing is fetched behind your back.
 
 ## Commands
 
@@ -54,6 +54,15 @@ kie credits show
 `model list` prints one line per model — ID, category, vendor and name — and
 `model show` adds the documentation link and every input field with its type,
 whether it is required, its default and the values it accepts.
+
+`catalog update` downloads the published catalog into the state directory, and
+every command reads that copy from then on. `catalog show` reports which
+catalog is in effect — `built-in` or `downloaded` — the day it was generated,
+how many models it holds, and, for a downloaded one, the directory it sits in.
+There is no command to go back: delete that directory and the binary returns to
+the catalog it was built with. A downloaded catalog this binary cannot read is
+reported rather than skipped over, so the origin `catalog show` names is always
+the one actually in use.
 
 `task run` takes the model ID as a positional argument and its inputs as flags
 derived from the catalog. `--input` accepts the same inputs as a JSON document,

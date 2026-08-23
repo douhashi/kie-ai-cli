@@ -4,14 +4,22 @@
 // catalog.json next to this file, which is embedded into the binary. Every
 // model is therefore readable with no network at all; the price is that the
 // catalog ages, which [Catalog.StaleWarning] reports.
+//
+// [Update] downloads the published catalog into a directory of the user's own,
+// and [Load] reads that copy in preference to the embedded one. The embedded
+// catalog is never overwritten: it is what the binary falls back to when the
+// directory is emptied, and what a fresh install runs on.
 package catalog
 
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -27,6 +35,11 @@ const SchemaVersion = 1
 // alone for a quarter says so. #5 will measure how fast the catalog actually
 // moves, and this line is where that answer lands.
 const MaxAge = 90 * 24 * time.Hour
+
+// CatalogFile names the generated catalog itself. The published asset, the
+// downloaded copy and the embedded one all go by it, so that a user who looks
+// in the directory sees the same file the repository holds.
+const CatalogFile = "catalog.json"
 
 //go:embed catalog.json
 var embeddedCatalog []byte
@@ -46,6 +59,18 @@ const GeneratedAtFile = "generated_at.txt"
 //go:embed generated_at.txt
 var embeddedGeneratedAt string
 
+// Origin says which of the two catalogs a value came from. It is reported to
+// the user, because the two age for different reasons and are refreshed by
+// different acts: one by installing a new binary, the other by downloading.
+type Origin string
+
+const (
+	// OriginBuiltIn is the catalog embedded in this binary.
+	OriginBuiltIn Origin = "built-in"
+	// OriginDownloaded is the catalog `catalog update` fetched.
+	OriginDownloaded Origin = "downloaded"
+)
+
 // Catalog is the generated set of models, sorted by Model.ID.
 type Catalog struct {
 	SchemaVersion int     `json:"schemaVersion"`
@@ -53,37 +78,92 @@ type Catalog struct {
 	// GeneratedAt is the day the catalog was generated, in UTC. It is kept out
 	// of the JSON on purpose; see embeddedGeneratedAt.
 	GeneratedAt time.Time `json:"-"`
+	// Origin is where this value was read from, and Path the directory holding
+	// it, which is empty for OriginBuiltIn. Both describe this copy rather
+	// than the generated catalog, so neither belongs in the file.
+	Origin Origin `json:"-"`
+	Path   string `json:"-"`
 }
 
-// load parses the embedded catalog once and hands the same value to everyone.
-var load = sync.OnceValues(parseEmbedded)
-
-// Load returns the catalog embedded in this binary.
+// Load returns the catalog in effect: the one downloaded into dir if there is
+// one, and the one embedded in this binary otherwise.
 //
-// The result is shared between callers and must be treated as read-only.
-func Load() (Catalog, error) {
-	return load()
+// A dir holding a catalog that cannot be read is a failure rather than an
+// absence. Falling back would answer from the embedded catalog while a
+// downloaded one sits unread beside it, so the origin reported to the user
+// would be a lie and the broken files would never be noticed.
+func Load(dir string) (Catalog, error) {
+	downloaded, found, err := loadDir(dir)
+	if err != nil || found {
+		return downloaded, err
+	}
+	embedded, err := parse(embeddedCatalog, embeddedGeneratedAt)
+	if err != nil {
+		return Catalog{}, fmt.Errorf("the catalog built into this binary is unusable: %w", err)
+	}
+	embedded.Origin = OriginBuiltIn
+	return embedded, nil
 }
 
-func parseEmbedded() (Catalog, error) {
+// loadDir reads the downloaded pair, reporting false when dir holds neither
+// half of it. Holding one half is not an absence: it is an update that was
+// interrupted between its two renames, and the missing file is the one thing
+// that would go unnoticed.
+func loadDir(dir string) (Catalog, bool, error) {
+	catalogJSON, catalogErr := os.ReadFile(filepath.Join(dir, CatalogFile))
+	generatedAt, dateErr := os.ReadFile(filepath.Join(dir, GeneratedAtFile))
+	if errors.Is(catalogErr, fs.ErrNotExist) && errors.Is(dateErr, fs.ErrNotExist) {
+		return Catalog{}, false, nil
+	}
+	if catalogErr != nil {
+		return Catalog{}, false, unusable(dir, catalogErr)
+	}
+	if dateErr != nil {
+		return Catalog{}, false, unusable(dir, dateErr)
+	}
+	parsed, err := parse(catalogJSON, string(generatedAt))
+	if err != nil {
+		return Catalog{}, false, unusable(dir, err)
+	}
+	parsed.Origin = OriginDownloaded
+	parsed.Path = dir
+	return parsed, true, nil
+}
+
+// unusable reports a downloaded catalog that cannot be read, with both ways
+// out of it: the user is not expected to know that emptying the directory is
+// what returns the binary to the catalog it carries.
+func unusable(dir string, err error) error {
+	return fmt.Errorf("the downloaded catalog in %s is unusable: %w; run `catalog update` to download it again, or delete the directory to go back to the catalog built into this binary", dir, err)
+}
+
+// parse turns the two files a catalog is made of into one value, whichever
+// copy they came from. Both copies are checked the same way, so a published
+// catalog this binary could not read is refused before it is written to disk.
+func parse(catalogJSON []byte, generatedAt string) (Catalog, error) {
 	var parsed Catalog
-	if err := json.Unmarshal(embeddedCatalog, &parsed); err != nil {
-		return Catalog{}, fmt.Errorf("decode the embedded catalog: %w", err)
+	if err := json.Unmarshal(catalogJSON, &parsed); err != nil {
+		return Catalog{}, fmt.Errorf("decode %s: %w", CatalogFile, err)
 	}
 	if parsed.SchemaVersion != SchemaVersion {
-		return Catalog{}, fmt.Errorf("the embedded catalog is schema version %d, but this binary reads version %d",
-			parsed.SchemaVersion, SchemaVersion)
+		return Catalog{}, fmt.Errorf("%s is schema version %d, but this binary reads version %d",
+			CatalogFile, parsed.SchemaVersion, SchemaVersion)
 	}
-	generatedAt, err := time.Parse(time.DateOnly, strings.TrimSpace(embeddedGeneratedAt))
+	day, err := time.Parse(time.DateOnly, strings.TrimSpace(generatedAt))
 	if err != nil {
-		return Catalog{}, fmt.Errorf("read the embedded generation date: %w", err)
+		return Catalog{}, fmt.Errorf("read %s: %w", GeneratedAtFile, err)
 	}
-	parsed.GeneratedAt = generatedAt
+	parsed.GeneratedAt = day
 	return parsed, nil
 }
 
 // StaleWarning describes the catalog's age once it exceeds MaxAge, and returns
 // an empty string while it is still fresh.
+//
+// It names the origin because that is what decides the remedy: a built-in
+// catalog is refreshed by downloading one, a downloaded one only by
+// downloading it again -- and if that changes nothing, the publishing side has
+// stopped, which is worth knowing.
 //
 // It only reports; the caller decides what to do with it, and writes it to
 // stderr so that --json output stays a clean document.
@@ -92,8 +172,8 @@ func (c Catalog) StaleWarning(now time.Time) string {
 	if age < MaxAge {
 		return ""
 	}
-	return fmt.Sprintf("the built-in model catalog was generated on %s, %d days ago",
-		c.GeneratedAt.Format(time.DateOnly), int(age/(24*time.Hour)))
+	return fmt.Sprintf("the %s model catalog was generated on %s, %d days ago",
+		c.Origin, c.GeneratedAt.Format(time.DateOnly), int(age/(24*time.Hour)))
 }
 
 // Style distinguishes the two ways kie.ai accepts a task creation request.

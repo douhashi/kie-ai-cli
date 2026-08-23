@@ -1,13 +1,15 @@
 name: Catalog publish
 
-# main に入ったカタログを、URL 1 本で取れる形に公開する。
+# main に入ったカタログを、URL 2 本で取れる形に公開する。
 # `catalog update` の取得先はこの資産であり、コミット済みの内容と byte 一致させる。
 on:
   push:
     branches: [main]
-    # 資産は catalog.json のみ。generated_at.txt だけが動くことは
-    # 生成器の作りから起こらない（#3）。
-    paths: [internal/catalog/catalog.json]
+    # 焼き込みと同じ 2 ファイルを資産にする。生成器は 2 つを必ず一緒に
+    # 書き換えるが（#3）、片方だけが動いたときに公開が止まらないよう両方を見る。
+    paths:
+      - internal/catalog/catalog.json
+      - internal/catalog/generated_at.txt
   workflow_dispatch:
 
 # 資産の差し替えを重ねない。
@@ -21,8 +23,8 @@ permissions:
   issues: write
 
 env:
-  # 版を刻まない固定 tag。取得側は 1 つの URL を知っていればよく、
-  # 鮮度は資産の updated_at が持つ。
+  # 版を刻まない固定 tag。取得側は tag の下の 2 つの名前を知っていればよく、
+  # Release API を叩かずに鮮度まで得られる（generated_at.txt が持つ）。
   RELEASE_TAG: catalog
 
 jobs:
@@ -34,21 +36,27 @@ jobs:
 
       # 再生成はしない。main に入っているものをそのまま上げる（公開物と
       # コミット済みが食い違うと、どちらが正しいか誰にも分からなくなる）。
-      - name: Publish catalog asset
+      - name: Publish catalog assets
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          notes="internal/catalog/catalog.json @ $SHA"
+          notes="internal/catalog/{catalog.json,generated_at.txt} @ $SHA"
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" --notes "$notes"
-            gh release upload "$RELEASE_TAG" internal/catalog/catalog.json --clobber
           else
             # CLI 本体の版と混ざらないよう latest にはしない。
             gh release create "$RELEASE_TAG" --latest=false \
-              --title "Model catalog" --notes "$notes" internal/catalog/catalog.json
+              --title "Model catalog" --notes "$notes"
           fi
+          # 1 本ずつ、この順で上げる。2 つを 1 回の upload に渡すと順序を
+          # gh に委ねることになる。catalog.json が先なのは、2 つの入れ替えの
+          # 間に取得されたとき「新しいモデルに古い日付」となり、鮮度を
+          # 過小に見せる側へ倒れるからである。逆順は無い鮮度を名乗る。
+          for asset in catalog.json generated_at.txt; do
+            gh release upload "$RELEASE_TAG" "internal/catalog/$asset" --clobber
+          done
 
       - name: Report failure
         if: failure()
