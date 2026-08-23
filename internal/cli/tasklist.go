@@ -19,8 +19,9 @@ import (
 
 func bindTaskList(_ *env, fs *flag.FlagSet, _ []string) (binding, error) {
 	status := fs.String("status", "", "only the tasks in this state: "+strings.Join(kie.Statuses, ", "))
+	unsaved := fs.Bool(flagUnsaved, false, "only the tasks that have produced something nothing has saved yet")
 	return binding{run: func(e *env, args []string) error {
-		return runTaskList(e, args, *status)
+		return runTaskList(e, args, *status, *unsaved)
 	}}, nil
 }
 
@@ -30,7 +31,7 @@ func bindTaskList(_ *env, fs *flag.FlagSet, _ []string) (binding, error) {
 // one would take a round trip per row and get slower the more there is to
 // list. What that costs is that a row can be out of date, which the count at
 // the end is there to say.
-func runTaskList(e *env, args []string, status string) error {
+func runTaskList(e *env, args []string, status string, unsaved bool) error {
 	if len(args) != 0 {
 		return usagef("task list: expected no arguments, got %d", len(args))
 	}
@@ -46,7 +47,14 @@ func runTaskList(e *env, args []string, status string) error {
 	}
 	defer func() { _ = l.Close() }()
 
-	tasks, err := l.List(ctx, statuses...)
+	// The two filters narrow the listing together: --unsaved is a question
+	// about tasks that have succeeded, so asking it of another state
+	// answers with nothing rather than with that state's tasks.
+	list := l.List
+	if unsaved {
+		list = l.ListUnsaved
+	}
+	tasks, err := list(ctx, statuses...)
 	if err != nil {
 		return err
 	}
@@ -220,9 +228,12 @@ type taskSummary struct {
 	ResultURLs []string `json:"resultUrls"`
 	// Error is present only on a task that failed, so that a consumer
 	// cannot read an empty string as a failure with nothing to say.
-	Error     string `json:"error,omitempty"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
+	Error string `json:"error,omitempty"`
+	// SavedPaths is where what the task produced is on this machine, empty
+	// until task download has fetched it.
+	SavedPaths []string `json:"savedPaths"`
+	CreatedAt  string   `json:"createdAt"`
+	UpdatedAt  string   `json:"updatedAt"`
 }
 
 // writeTasks prints a listing. Both commands use it: refresh answers with the
@@ -238,6 +249,7 @@ func writeTasks(e *env, tasks []ledger.Task) error {
 				Status:     task.Status,
 				ResultURLs: task.ResultURLs,
 				Error:      task.Error,
+				SavedPaths: task.SavedPaths,
 				CreatedAt:  task.CreatedAt.Format(time.RFC3339),
 				UpdatedAt:  task.UpdatedAt.Format(time.RFC3339),
 			})

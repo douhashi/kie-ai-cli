@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -205,6 +207,7 @@ func TestTaskListAsJSON(t *testing.T) {
 		ModelID    string   `json:"modelId"`
 		Status     string   `json:"status"`
 		ResultURLs []string `json:"resultUrls"`
+		SavedPaths []string `json:"savedPaths"`
 		CreatedAt  string   `json:"createdAt"`
 	}
 	if err := json.Unmarshal([]byte(got.stdout), &listed); err != nil {
@@ -219,8 +222,71 @@ func TestTaskListAsJSON(t *testing.T) {
 	if listed[0].ResultURLs == nil {
 		t.Error("resultUrls is null; a task that has produced nothing has produced an empty list")
 	}
+	if listed[0].SavedPaths == nil {
+		t.Error("savedPaths is null; a task nothing has saved has an empty list of paths")
+	}
 	if _, err := time.Parse(time.RFC3339, listed[0].CreatedAt); err != nil {
 		t.Errorf("createdAt = %q, want a timestamp: %v", listed[0].CreatedAt, err)
+	}
+}
+
+// AC2: the listing can be narrowed to what is left to collect, which is the
+// question the results expiring makes worth asking. A success with no files
+// behind it is not part of the answer: nothing could ever save it, and it
+// would sit in the listing for ever.
+func TestTaskListUnsaved(t *testing.T) {
+	layout, dir, h := saver(t, map[string]file{"/results/a.png": {body: "a", mediaType: "image/png"}})
+	produced(t, layout, "has-files", h.url+"/results/a.png")
+	produced(t, layout, "no-files")
+	add(t, layout, "still-running", marketModel, kie.StatusRunning)
+	add(t, layout, "failed", marketModel, kie.StatusFailed)
+
+	got := run(t, "task", "list", "--unsaved")
+	if got.code != 0 {
+		t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
+	}
+	if !strings.Contains(got.stdout, "has-files") {
+		t.Errorf("the listing lacks the task with something to save:\n%s", got.stdout)
+	}
+	for _, unwanted := range []string{"no-files", "still-running", "failed"} {
+		if strings.Contains(got.stdout, unwanted) {
+			t.Errorf("the listing holds %q, which has nothing to save:\n%s", unwanted, got.stdout)
+		}
+	}
+
+	// Once it is saved it is not left to do, and the listing says so
+	// without anything having to be asked of kie.ai.
+	if saved := run(t, "task", "download", "has-files"); saved.code != 0 {
+		t.Fatalf("task download: code %d, stderr %q", saved.code, saved.stderr)
+	}
+	got = run(t, "task", "list", "--unsaved")
+	if got.code != 0 {
+		t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
+	}
+	if strings.TrimSpace(got.stdout) != "" {
+		t.Errorf("the listing is not empty after everything was saved:\n%s", got.stdout)
+	}
+	// The whole ledger is still there; only the question was narrower.
+	if all := run(t, "task", "list"); !strings.Contains(all.stdout, "has-files") {
+		t.Errorf("the saved task is missing from the full listing:\n%s", all.stdout)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "has-files-1.png")); err != nil {
+		t.Errorf("the saved file is not on disk: %v", err)
+	}
+}
+
+// --status and --unsaved are two filters on one listing, so a state that no
+// unsaved task is in answers with nothing rather than with that state.
+func TestTaskListUnsavedNarrowsByStatusToo(t *testing.T) {
+	layout, _, h := saver(t, nil)
+	produced(t, layout, "has-files", h.url+"/results/a.png")
+
+	got := run(t, "task", "list", "--unsaved", "--status", kie.StatusFailed)
+	if got.code != 0 {
+		t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
+	}
+	if strings.TrimSpace(got.stdout) != "" {
+		t.Errorf("a failed task was listed as unsaved:\n%s", got.stdout)
 	}
 }
 

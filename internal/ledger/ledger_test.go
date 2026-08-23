@@ -32,6 +32,7 @@ func TestAddAndGetRoundTrip(t *testing.T) {
 		Input:      input,
 		Status:     "submitted",
 		ResultURLs: []string{},
+		SavedPaths: []string{},
 	}
 	assertTaskEqual(t, got, want)
 	if got.CreatedAt.IsZero() || !got.CreatedAt.Equal(got.UpdatedAt) {
@@ -453,4 +454,173 @@ func TestOpenMigratesAVersionOneLedger(t *testing.T) {
 	if got.Error != "" {
 		t.Errorf("Error = %q, want the column to default to empty", got.Error)
 	}
+}
+
+// V3: a ledger written before the saved column existed is carried forward
+// rather than started over, and its rows read back as having saved nothing.
+func TestOpenMigratesAVersionTwoLedger(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "ledger.db")
+
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if err := migrate(ctx, db, migrations[:2]); err != nil {
+		t.Fatalf("migrate to v2: %v", err)
+	}
+	const insert = `INSERT INTO tasks (task_id, model_id, input, status, result_urls, error, created_at, updated_at)
+		VALUES ('task-1', 'veo3', '{"prompt":"a cat"}', 'succeeded', '["https://kie.example/a.png"]', '', ?, ?)`
+	now := timestamp()
+	if _, err := db.ExecContext(ctx, insert, now, now); err != nil {
+		t.Fatalf("insert a v2 row: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	l := open(t, path)
+	if v := schemaVersion(t, l); v != len(migrations) {
+		t.Errorf("user_version = %d, want %d", v, len(migrations))
+	}
+	got, err := l.Get(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("Get() after migration error: %v", err)
+	}
+	if !reflect.DeepEqual(got.Input, map[string]any{"prompt": "a cat"}) {
+		t.Errorf("Input = %v, want it preserved", got.Input)
+	}
+	if !reflect.DeepEqual(got.ResultURLs, []string{"https://kie.example/a.png"}) {
+		t.Errorf("ResultURLs = %v, want them preserved", got.ResultURLs)
+	}
+	if !reflect.DeepEqual(got.SavedPaths, []string{}) {
+		t.Errorf("SavedPaths = %v, want the column to default to nothing saved", got.SavedPaths)
+	}
+	// The row a migration carried forward has to be one ListUnsaved sees:
+	// a task recorded before this column existed has certainly not been
+	// saved by the command that did not exist either.
+	unsaved, err := l.ListUnsaved(ctx)
+	if err != nil {
+		t.Fatalf("ListUnsaved() error: %v", err)
+	}
+	if len(unsaved) != 1 || unsaved[0].TaskID != "task-1" {
+		t.Errorf("ListUnsaved() = %v, want the migrated row", unsaved)
+	}
+}
+
+func TestMarkSavedRecordsWhereTheResultsWent(t *testing.T) {
+	ctx := context.Background()
+	l := openTemp(t)
+	succeeded(t, l, "task-1", "https://kie.example/a.png")
+
+	paths := []string{"/tmp/out/task-1-1.png", "/tmp/out/task-1-2.png"}
+	if err := l.MarkSaved(ctx, "task-1", paths); err != nil {
+		t.Fatalf("MarkSaved() error: %v", err)
+	}
+
+	got, err := l.Get(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if !reflect.DeepEqual(got.SavedPaths, paths) {
+		t.Errorf("SavedPaths = %v, want %v", got.SavedPaths, paths)
+	}
+}
+
+// Recording nothing would write the value that means "not saved", so a caller
+// that lost its paths on the way here must not read as a success.
+func TestMarkSavedRefusesToRecordNothing(t *testing.T) {
+	l := openTemp(t)
+	succeeded(t, l, "task-1", "https://kie.example/a.png")
+
+	if err := l.MarkSaved(context.Background(), "task-1", nil); err == nil {
+		t.Fatal("MarkSaved() with no paths succeeded, want an error")
+	}
+}
+
+func TestMarkSavedUnknownTask(t *testing.T) {
+	l := openTemp(t)
+
+	err := l.MarkSaved(context.Background(), "missing", []string{"/tmp/x.png"})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("MarkSaved() error = %v, want ErrNotFound", err)
+	}
+}
+
+// Unsaved is one question -- what is there to save that has not been saved --
+// and every row that cannot answer it with a file is left out of the listing.
+func TestListUnsavedIsTheTasksWithSomethingLeftToSave(t *testing.T) {
+	ctx := context.Background()
+	l := openTemp(t)
+
+	succeeded(t, l, "unsaved", "https://kie.example/a.png")
+	succeeded(t, l, "saved", "https://kie.example/b.png")
+	if err := l.MarkSaved(ctx, "saved", []string{"/tmp/saved-1.png"}); err != nil {
+		t.Fatalf("MarkSaved() error: %v", err)
+	}
+	// The lyrics endpoint answers with the words themselves, so this task
+	// succeeded and has no file behind it. Counting it would leave a row
+	// that can never be saved in the listing for ever.
+	succeeded(t, l, "no-urls")
+	add(t, l, "running", "running")
+	add(t, l, "failed", "failed")
+
+	tasks, err := l.ListUnsaved(ctx)
+	if err != nil {
+		t.Fatalf("ListUnsaved() error: %v", err)
+	}
+	if got := ids(tasks); !slices.Equal(got, []string{"unsaved"}) {
+		t.Errorf("ListUnsaved() = %v, want [unsaved]", got)
+	}
+}
+
+// --unsaved and --status are two filters on one listing, so they narrow it
+// together: a state no unsaved task is in answers with nothing at all.
+func TestListUnsavedNarrowsByStatusToo(t *testing.T) {
+	ctx := context.Background()
+	l := openTemp(t)
+	succeeded(t, l, "task-1", "https://kie.example/a.png")
+
+	tasks, err := l.ListUnsaved(ctx, "succeeded")
+	if err != nil {
+		t.Fatalf("ListUnsaved(succeeded) error: %v", err)
+	}
+	if got := ids(tasks); !slices.Equal(got, []string{"task-1"}) {
+		t.Errorf("ListUnsaved(succeeded) = %v, want [task-1]", got)
+	}
+
+	tasks, err = l.ListUnsaved(ctx, "failed")
+	if err != nil {
+		t.Fatalf("ListUnsaved(failed) error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("ListUnsaved(failed) = %v, want empty", ids(tasks))
+	}
+}
+
+// add records one task in the given state, the way task run would have.
+func add(t *testing.T, l *Ledger, taskID, status string) {
+	t.Helper()
+	if err := l.Add(context.Background(), taskID, "veo3", status, nil); err != nil {
+		t.Fatalf("Add(%s) error: %v", taskID, err)
+	}
+}
+
+// succeeded records one finished task and what it produced, the way task
+// refresh would have.
+func succeeded(t *testing.T, l *Ledger, taskID string, urls ...string) {
+	t.Helper()
+	add(t, l, taskID, "submitted")
+	result := Result{Status: "succeeded", ResultURLs: urls}
+	if err := l.Update(context.Background(), taskID, result); err != nil {
+		t.Fatalf("Update(%s) error: %v", taskID, err)
+	}
+}
+
+func ids(tasks []Task) []string {
+	out := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		out = append(out, task.TaskID)
+	}
+	return out
 }

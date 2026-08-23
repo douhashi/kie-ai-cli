@@ -35,6 +35,17 @@ var migrations = [][]string{
 		// arrives once, in the answer to the query that saw the failure.
 		`ALTER TABLE tasks ADD COLUMN error TEXT NOT NULL DEFAULT ''`,
 	},
+	{ // v3: where what a task produced was saved to.
+		//
+		// What kie.ai serves expires -- a result in days, a download
+		// link in twenty minutes -- so the one thing that has to be
+		// answerable offline is which results are not on this machine
+		// yet. A JSON array of absolute paths, empty for a task nothing
+		// has saved: the ledger records the paths it wrote rather than
+		// looking on disk, so the answer does not change under a file
+		// the user moved somewhere of their own.
+		`ALTER TABLE tasks ADD COLUMN saved_paths TEXT NOT NULL DEFAULT '[]'`,
+	},
 }
 
 // migrate brings db up to the last version in ms, applying only what it has

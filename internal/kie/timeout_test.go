@@ -3,6 +3,7 @@ package kie
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -51,6 +52,14 @@ func TestEveryCallGivesUpWithoutTheCallerSettingADeadline(t *testing.T) {
 			limit: &uploadTimeout,
 			call: func(c *Client) error {
 				_, err := c.UploadStream(context.Background(), "a.png", strings.NewReader("bytes"))
+				return err
+			},
+		},
+		{
+			name:  "a download",
+			limit: &downloadTimeout,
+			call: func(c *Client) error {
+				_, err := c.Download(context.Background(), c.BaseURL+"/results/a.png", io.Discard)
 				return err
 			},
 		},
