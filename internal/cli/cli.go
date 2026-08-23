@@ -55,6 +55,11 @@ var commands = []command{
 		summary: "Show the configuration and where the state is kept.",
 		run:     runConfigShow,
 	},
+	{
+		noun: "credits", verb: "show",
+		summary: "Show the credit balance of the kie.ai account.",
+		run:     runCreditsShow,
+	},
 }
 
 // Run executes one invocation and reports the exit code.

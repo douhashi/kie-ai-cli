@@ -7,20 +7,12 @@
 package config_test
 
 import (
-	"context"
-	"io"
-	"net/http"
 	"os"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/douhashi/kie-ai-cli/internal/config"
+	"github.com/douhashi/kie-ai-cli/internal/kie"
 )
-
-// creditURL is the cheapest authenticated endpoint kie.ai has: it reads the
-// balance and creates nothing.
-const creditURL = "https://api.kie.ai/api/v1/chat/credit"
 
 // V3: a key reaches kie.ai whichever of the two places it is configured in.
 func TestResolvedKeyAuthenticates(t *testing.T) {
@@ -64,31 +56,16 @@ func resolve(t *testing.T, path string) config.APIKey {
 	return key
 }
 
-// authenticate calls kie.ai with the resolved key. Only the mask of the key is
+// authenticate calls kie.ai with the resolved key. Reading the balance is the
+// cheapest authenticated call there is: it creates nothing. Which endpoint that
+// is, and how its answer is read, belongs to internal/kie; this test only cares
+// that the key it resolved is one kie.ai accepts. Only the mask of the key is
 // ever logged, so a failing run does not put the credential in the output.
 func authenticate(t *testing.T, key config.APIKey) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, creditURL, nil)
+	balance, err := kie.New(key.Value).Credits(t.Context())
 	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
+		t.Fatalf("reading the balance with the key %s from %q: %v", key.Masked(), key.Source, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+key.Value)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("GET %s with the key from %q: %v", creditURL, key.Source, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if err != nil {
-		t.Fatalf("reading the response: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET %s with the key %s from %q: status %d, body %s", creditURL, key.Masked(), key.Source, resp.StatusCode, body)
-	}
-	t.Logf("GET %s with the key %s from %q: %d %s", creditURL, key.Masked(), key.Source, resp.StatusCode, strings.TrimSpace(string(body)))
+	t.Logf("the key %s from %q reads a balance of %s", key.Masked(), key.Source, balance)
 }
