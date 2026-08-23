@@ -68,9 +68,17 @@ use any OpenAI-compatible client for those.
 
 ## State on disk
 
-Everything lives under `$XDG_DATA_HOME/kie-ai-cli`: the SQLite ledger, the
-downloaded catalog, and the configuration file. The API key is read from the
-environment first and from the configuration file otherwise.
+Everything lives under `$XDG_DATA_HOME/kie-ai-cli`, or under
+`~/.local/share/kie-ai-cli` when that variable is unset or not an absolute
+path: the SQLite ledger in `ledger.db`, the downloaded catalog in `catalog/`,
+and the configuration in `config/config.json`.
+
+The API key is read from the `KIE_AI_API_KEY` environment variable first and
+from the configuration file otherwise, so a key can be given for a single
+invocation without being stored. `kie config set api_key <value>` writes the
+file, which is created with mode `0600` and never left more permissive than
+that. `kie config show` reports which key is in effect — masked to its last four
+characters — where it came from, and where each of those files lives.
 
 ## Build
 

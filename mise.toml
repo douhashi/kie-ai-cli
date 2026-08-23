@@ -34,6 +34,8 @@ run = [
 description = "Go のテストを走らせる"
 # ビルドと同じく cgo 無しで走らせる。SQLite は pure Go 実装なので、
 # ここで cgo が要るようになったら依存の入れ替わりを疑う。
+# 外部 API を叩く疎通テストは `e2e` タグで分離してあり、ここには入らない。
+# 実行は `infisical run -- go test -tags e2e ./...`（docs/development/setup.md）。
 run = ["CGO_ENABLED=0 go test ./..."]
 
 [tasks.build]

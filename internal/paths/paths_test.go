@@ -54,6 +54,46 @@ func TestRootIgnoresRelativeXDGDataHome(t *testing.T) {
 	}
 }
 
+// Every location is derived from the one root, so that no caller has to know
+// how the root itself is found.
+func TestResolveLocatesEverythingUnderRoot(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", base)
+	root := filepath.Join(base, "kie-ai-cli")
+
+	got, err := paths.Resolve()
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	want := paths.Layout{
+		Root:    root,
+		Config:  filepath.Join(root, "config", "config.json"),
+		Catalog: filepath.Join(root, "catalog"),
+		Ledger:  filepath.Join(root, "ledger.db"),
+	}
+	if got != want {
+		t.Errorf("Resolve() = %+v, want %+v", got, want)
+	}
+	assertPrivateDir(t, root)
+}
+
+// Resolve must reject a relative XDG_DATA_HOME the same way Root does; two
+// answers to where the root is would put the settings and the ledger in
+// different places.
+func TestResolveIgnoresRelativeXDGDataHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", "relative/data")
+
+	got, err := paths.Resolve()
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if want := filepath.Join(home, ".local", "share", "kie-ai-cli"); got.Root != want {
+		t.Errorf("Resolve().Root = %q, want %q", got.Root, want)
+	}
+}
+
 func TestLedgerLivesUnderRoot(t *testing.T) {
 	for _, tc := range []struct {
 		name string

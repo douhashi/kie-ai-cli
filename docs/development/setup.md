@@ -33,6 +33,17 @@ infisical login
 infisical run -- <command>
 ```
 
+CLI 自身は環境変数 `KIE_AI_API_KEY` を優先し、無ければ設定ファイルから読む。
+設定ファイルは `kie-ai-cli config set api_key <value>` が 0600 で書く。
+開発中は前者を Infisical が注入するので、設定ファイルは作らなくてよい。
+
+外部 API への疎通テストは `e2e` タグで分離してある。`mise run test` には
+含まれないので、鍵を注入して明示的に走らせる。
+
+```sh
+infisical run -- go test -tags e2e ./...
+```
+
 ## タスク
 
 `mise tasks` で一覧できる。
@@ -41,7 +52,7 @@ infisical run -- <command>
 |---|---|
 | `mise run setup` | git hooks の導入 |
 | `mise run lint` | ドキュメントの書式契約と Go の静的検査 |
-| `mise run test` | Go のテスト（cgo 無し） |
+| `mise run test` | Go のテスト（cgo 無し・`e2e` タグを除く） |
 | `mise run build` | 手元向けの単一バイナリを `dist/` に作る |
 | `mise run build-all` | 配布対象の 3 OS 向けにクロスビルドし、成果物を検査する |
 
