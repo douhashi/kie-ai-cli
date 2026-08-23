@@ -104,7 +104,7 @@ Go の検査はツールチェーンを要してフックには重いので、`m
 
 ## CI
 
-CI は PR で 3 つのジョブを回す。どちらも `mise install` の後に mise タスクを呼ぶだけで、
+CI は PR で 2 つのジョブを回す。どちらも `mise install` の後に mise タスクを呼ぶだけで、
 検査の中身は `mise.toml` を SSoT とする（CI 側で二重定義しない）。
 
 | ジョブ | 内容 |
@@ -113,4 +113,22 @@ CI は PR で 3 つのジョブを回す。どちらも `mise install` の後に
 | `build` | `mise run build-all`。3 OS 分が壊れていないことを PR の時点で落とす |
 
 書式契約もビルドの前提も、レビューの目視ではなく **機械的に落とす**
-（規約を文章で定めるだけでは守られない）。成果物の公開は CI では行わない。
+（規約を文章で定めるだけでは守られない）。
+
+PR の検査とは別に、カタログの追従を 2 つのワークフローが回す。
+
+| ワークフロー | 内容 |
+|---|---|
+| `catalog-refresh` | 日次（03:27 JST）と手動で `mise run catalog` を回し、差分があれば `catalog-refresh` ブランチへ force push して PR を出す |
+| `catalog-publish` | main の `catalog.json` 更新を tag `catalog` の Release 資産へ上げる |
+
+差分が無い日は PR を作らない。差分があった日は同じジョブで `mise run lint` と
+`mise run test` まで通してから PR を出す。`GITHUB_TOKEN` が作った PR には CI が
+走らないので、検査結果は PR 本文に残す。既に open な PR があればブランチの更新に
+留め、PR を積み上げない。
+
+どちらも失敗したら黙って終わらない。label `catalog-refresh` の open issue が
+無ければ run URL 付きで起票し、あればコメントを足す。**定期実行の失敗は誰も
+見ていないところで起きる**ので、気づく経路を run 履歴の目視に委ねない。
+
+CLI バイナリの配布は CI では行わない。CI が公開するのはカタログだけである。
