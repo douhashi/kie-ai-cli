@@ -1,0 +1,67 @@
+name: Catalog publish
+
+# main に入ったカタログを、URL 1 本で取れる形に公開する。
+# `catalog update` の取得先はこの資産であり、コミット済みの内容と byte 一致させる。
+on:
+  push:
+    branches: [main]
+    # 資産は catalog.json のみ。generated_at.txt だけが動くことは
+    # 生成器の作りから起こらない（#3）。
+    paths: [internal/catalog/catalog.json]
+  workflow_dispatch:
+
+# 資産の差し替えを重ねない。
+concurrency:
+  group: catalog-publish
+  cancel-in-progress: false
+
+# contents: Release の作成と資産の差し替え / issues: 失敗を起票する。
+permissions:
+  contents: write
+  issues: write
+
+env:
+  # 版を刻まない固定 tag。取得側は 1 つの URL を知っていればよく、
+  # 鮮度は資産の updated_at が持つ。
+  RELEASE_TAG: catalog
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 再生成はしない。main に入っているものをそのまま上げる（公開物と
+      # コミット済みが食い違うと、どちらが正しいか誰にも分からなくなる）。
+      - name: Publish catalog asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          notes="internal/catalog/catalog.json @ $SHA"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --notes "$notes"
+            gh release upload "$RELEASE_TAG" internal/catalog/catalog.json --clobber
+          else
+            # CLI 本体の版と混ざらないよう latest にはしない。
+            gh release create "$RELEASE_TAG" --latest=false \
+              --title "Model catalog" --notes "$notes" internal/catalog/catalog.json
+          fi
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --label catalog-refresh --state open --limit 1 --json number --jq '.[].number')"
+          body="カタログの公開が失敗した: $RUN_URL"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --label catalog-refresh \
+              --title "chore(catalog): カタログの公開が失敗している" --body "$body"
+          fi
