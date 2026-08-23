@@ -6,16 +6,20 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/douhashi/kie-ai-cli/internal/catalog"
 	"github.com/douhashi/kie-ai-cli/internal/catalog/gen"
 	"github.com/douhashi/kie-ai-cli/internal/catalog/gen/source"
 )
@@ -40,20 +44,23 @@ func main() {
 		out:         *out,
 		pagesDir:    *pagesDir,
 		concurrency: *concurrency,
+		now:         time.Now().UTC(),
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "catalog-gen: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-// options is what a run needs. indexURL and interval are fields so a test can
-// point the crawl at a server of its own and not pace itself for its sake.
+// options is what a run needs. indexURL, interval and now are fields so a test
+// can point the crawl at a server of its own, not pace itself for its sake, and
+// decide the date a run stamps.
 type options struct {
 	indexURL    string
 	out         string
 	pagesDir    string
 	concurrency int
 	interval    time.Duration
+	now         time.Time
 }
 
 func run(ctx context.Context, opts options) error {
@@ -72,18 +79,59 @@ func run(ctx context.Context, opts options) error {
 		return err
 	}
 
-	// Written only now: a catalog missing whatever failed would be worse than
-	// the one already on disk.
-	if err := writeCatalog(opts.out, built); err != nil {
+	// Nothing is written until here: a catalog missing whatever failed would be
+	// worse than the one already on disk.
+	rendered, err := render(built)
+	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "catalog-gen: wrote %d models to %s\n", len(built.Models), opts.out)
+	current, err := os.ReadFile(opts.out)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	stampPath := filepath.Join(filepath.Dir(opts.out), catalog.GeneratedAtFile)
+
+	// A crawl that turns up nothing new leaves both files exactly as they were.
+	// Stamping today's date on an identical catalog would make every scheduled
+	// run in #5 a pull request that moves one line and says nothing.
+	if bytes.Equal(current, rendered) {
+		fmt.Fprintf(os.Stderr, "catalog-gen: %s is unchanged (%d models); left it and %s as they were\n",
+			opts.out, len(built.Models), stampPath)
+		return nil
+	}
+
+	if err := writeAtomically(opts.out, rendered); err != nil {
+		return err
+	}
+	// After the catalog, so that a failure here leaves a date older than the
+	// catalog it describes rather than one that overstates its freshness.
+	stamp := []byte(opts.now.UTC().Format(time.DateOnly) + "\n")
+	if err := writeAtomically(stampPath, stamp); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "catalog-gen: wrote %d models to %s, generated %s\n",
+		len(built.Models), opts.out, bytes.TrimSpace(stamp))
 	return nil
 }
 
-// writeCatalog renders the catalog and swaps it in atomically, so a failed run
-// never leaves a truncated catalog behind.
-func writeCatalog(path string, value any) error {
+// render encodes the catalog exactly as it is committed, so the bytes can be
+// compared with what is already on disk before anything is written.
+func render(value *catalog.Catalog) ([]byte, error) {
+	var out bytes.Buffer
+	encoder := json.NewEncoder(&out)
+	// Indent so a regeneration shows as a readable diff, and leave the docs
+	// text as written instead of escaping every < and & in it.
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// writeAtomically swaps the file in by rename, so a failed run never leaves a
+// truncated one behind.
+func writeAtomically(path string, content []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -93,19 +141,14 @@ func writeCatalog(path string, value any) error {
 	}
 	defer os.Remove(temp.Name())
 
-	encoder := json.NewEncoder(temp)
-	// Indent so a regeneration shows as a readable diff, and leave the docs
-	// text as written instead of escaping every < and & in it.
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(value); err != nil {
+	if _, err := temp.Write(content); err != nil {
 		temp.Close()
 		return err
 	}
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	// CreateTemp makes the file readable by its owner alone; the catalog is
+	// CreateTemp makes the file readable by its owner alone; both files are
 	// committed and read by everyone who builds.
 	if err := os.Chmod(temp.Name(), 0o644); err != nil {
 		return err

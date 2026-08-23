@@ -1,26 +1,25 @@
 package catalog_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/douhashi/kie-ai-cli/internal/catalog"
 )
 
-// committed reads the generated catalog as it stands in the repository. It is
-// what the binary will ship, so it is worth checking on its own rather than
-// only checking the generator that produced it.
+// committed returns the generated catalog as the binary ships it: the copy
+// embedded from catalog.json at build time. Checking it is a separate matter
+// from checking the generator that produced it.
 func committed(t *testing.T) catalog.Catalog {
 	t.Helper()
-	raw, err := os.ReadFile("catalog.json")
+	read, err := catalog.Load()
 	if err != nil {
-		t.Fatalf("read catalog.json: %v", err)
-	}
-	var read catalog.Catalog
-	if err := json.Unmarshal(raw, &read); err != nil {
-		t.Fatalf("decode catalog.json: %v", err)
+		t.Fatalf("load the embedded catalog: %v", err)
 	}
 	if read.SchemaVersion != catalog.SchemaVersion {
 		t.Fatalf("schemaVersion = %d, want %d", read.SchemaVersion, catalog.SchemaVersion)
@@ -118,13 +117,102 @@ func TestCommittedCatalogInputsCarryNoVendorExtensions(t *testing.T) {
 	}
 }
 
-// #1.3 embeds this file into the binary, and #8 filters on these two axes.
+// #8 filters on these two axes.
 func TestCommittedCatalogAxesAreSlugs(t *testing.T) {
 	for _, model := range committed(t).Models {
 		for field, value := range map[string]string{"category": model.Category, "vendor": model.Vendor} {
 			if value != strings.ToLower(value) || strings.ContainsAny(value, " \t") {
 				t.Errorf("%s: %s %q is not typable as a filter value", model.ID, field, value)
 			}
+		}
+	}
+}
+
+// AC1: the whole catalog is readable with no network of its own, because the
+// bytes are already in the binary.
+func TestEmbeddedCatalogHoldsEveryModel(t *testing.T) {
+	onDisk, err := os.ReadFile("catalog.json")
+	if err != nil {
+		t.Fatalf("read catalog.json: %v", err)
+	}
+	var want catalog.Catalog
+	if err := json.Unmarshal(onDisk, &want); err != nil {
+		t.Fatalf("decode catalog.json: %v", err)
+	}
+	got := committed(t).Models
+	if len(got) != len(want.Models) {
+		t.Fatalf("the embedded catalog holds %d models, the file %d", len(got), len(want.Models))
+	}
+	for i, model := range got {
+		if model.ID != want.Models[i].ID {
+			t.Fatalf("model %d is %s embedded and %s on disk", i, model.ID, want.Models[i].ID)
+		}
+	}
+}
+
+// The date is embedded from a file of its own, so the two must agree.
+func TestEmbeddedCatalogCarriesItsGenerationDate(t *testing.T) {
+	got := committed(t).GeneratedAt
+	if got.IsZero() {
+		t.Fatal("the catalog carries no generation date")
+	}
+	if got.Location() != time.UTC {
+		t.Errorf("generation date %s is not UTC", got)
+	}
+	raw, err := os.ReadFile(catalog.GeneratedAtFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", catalog.GeneratedAtFile, err)
+	}
+	if want := got.Format(time.DateOnly) + "\n"; string(raw) != want {
+		t.Errorf("%s is %q, want %q", catalog.GeneratedAtFile, raw, want)
+	}
+}
+
+// AC2: a binary carrying a catalog older than MaxAge says so, and one carrying
+// a fresh catalog stays quiet.
+func TestStaleWarningFiresOnlyPastMaxAge(t *testing.T) {
+	generated := time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC)
+	subject := catalog.Catalog{GeneratedAt: generated}
+
+	for _, tc := range []struct {
+		days int
+		warn bool
+	}{
+		// A clock behind the one that generated the catalog is not staleness.
+		{days: -30, warn: false},
+		{days: 0, warn: false},
+		{days: 89, warn: false},
+		{days: 90, warn: true},
+		{days: 91, warn: true},
+	} {
+		now := generated.AddDate(0, 0, tc.days)
+		got := subject.StaleWarning(now)
+		if (got != "") != tc.warn {
+			t.Errorf("%d days after generation: StaleWarning = %q, want warning: %v", tc.days, got, tc.warn)
+			continue
+		}
+		if !tc.warn {
+			continue
+		}
+		// A reader can only judge the warning with the date and the age in it.
+		for _, want := range []string{"2026-08-23", strconv.Itoa(tc.days)} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%d days after generation: StaleWarning = %q, want it to mention %s", tc.days, got, want)
+			}
+		}
+	}
+}
+
+// The date rides beside the catalog rather than inside it: catalog.json is
+// committed, so a regeneration that finds nothing new must produce no diff.
+func TestCommittedCatalogHoldsNoGenerationDate(t *testing.T) {
+	raw, err := os.ReadFile("catalog.json")
+	if err != nil {
+		t.Fatalf("read catalog.json: %v", err)
+	}
+	for _, unwanted := range []string{"generatedAt", committed(t).GeneratedAt.Format(time.DateOnly)} {
+		if bytes.Contains(raw, []byte(unwanted)) {
+			t.Errorf("catalog.json holds %q, which would make every regeneration a diff", unwanted)
 		}
 	}
 }

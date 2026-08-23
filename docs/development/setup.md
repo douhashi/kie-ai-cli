@@ -60,6 +60,14 @@ infisical run -- go test -tags e2e ./...
 mise run catalog -- --pages-dir .tmp/catalog-pages
 ```
 
+生成結果が前回と 1 バイトも変わらないときは、**何も書かずに終わる**。
+変わったときだけ `catalog.json` と、隣の `internal/catalog/generated_at.txt`
+（実行日を UTC の `YYYY-MM-DD` で 1 行）を書き換える。定期実行が中身の変わらない
+PR を出さないためで、**この日付を手で書き換えない**。
+
+この 2 ファイルはバイナリへ焼き込まれる。生成日から 90 日
+（`catalog.MaxAge`）を過ぎたカタログを積んだバイナリは、その旨を警告する。
+
 ## タスク
 
 `mise tasks` で一覧できる。
