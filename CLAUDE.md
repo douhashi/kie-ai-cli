@@ -15,6 +15,7 @@
 
 ## Documents
 
+- Business Index: @docs/business/INDEX.md
 - Development Index: @docs/development/INDEX.md
 - Development Philosophy: @docs/development/philosophy.md
 - Operations Index: @docs/operations/INDEX.md
