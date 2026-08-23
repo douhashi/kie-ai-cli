@@ -13,3 +13,6 @@
 
 # Temp design notes
 .tmp/
+
+# Build artifacts
+/dist/

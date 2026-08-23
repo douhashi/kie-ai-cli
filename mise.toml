@@ -2,18 +2,60 @@
 # 手順は docs/development/setup.md。
 
 [tools]
+# 本体の実装言語。単一バイナリを cgo 無しでビルドする。
+go = "1.26.7"
 # git hooks ランナー。`mise run setup` が .git/hooks へ導入する。
 lefthook = "1.13.6"
 # シークレット注入。kie.ai の API キーは Infisical から `infisical run` で渡す。
 infisical = "0.43.125"
+
+[env]
+# Go 自身の toolchain 自動取得を止める。放置すると go.mod の要求に応じて
+# 別版を勝手に落としてきて、[tools] の pin が実質無効になる。
+GOTOOLCHAIN = "local"
 
 [tasks.setup]
 description = "git hooks を導入し、開発を始められる状態にする"
 run = ["lefthook install"]
 
 [tasks.lint]
-description = "ドキュメントの書式契約を検査する"
+description = "ドキュメントの書式契約と Go の静的検査を通す"
 # 書式の定義は docs/document_system/templates/。上限が無いと各変更の
 # 「もう一言だけ足す」が複利で膨らむため、機械的に落とす。
 # Python 3 標準ライブラリのみで動き、この検査自体は追加の依存を持たない。
-run = ["python3 scripts/check-docs-format.py"]
+run = [
+  "python3 scripts/check-docs-format.py",
+  # gofmt は対象を並べるだけで終了コードを立てないため、出力の空判定で落とす。
+  'test -z "$(gofmt -l .)" || { echo "gofmt 未適用:" >&2; gofmt -l . >&2; exit 1; }',
+  "go vet ./...",
+]
+
+[tasks.build]
+description = "手元の OS/アーキテクチャ向けに単一バイナリをビルドする"
+# cgo を切って外部 C ライブラリへの動的リンクを排し、-trimpath で
+# 成果物にビルド環境の絶対パスを残さない。
+run = ["CGO_ENABLED=0 go build -trimpath -o dist/kie-ai-cli ."]
+
+[tasks.build-all]
+description = "配布対象の 3 OS 向けにクロスビルドし、成果物を検査する"
+# ビルドが通っただけでは「cgo 無しの単一バイナリ」を満たしたか分からないので、
+# 成果物の存在と記録された CGO_ENABLED をこのタスク自身で確認して落とす。
+run = """
+set -eu
+for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+  goos="${target%/*}"
+  goarch="${target#*/}"
+  out="dist/kie-ai-cli_${goos}_${goarch}"
+  if [ "$goos" = windows ]; then out="${out}.exe"; fi
+  CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -o "$out" .
+  if [ ! -f "$out" ]; then
+    echo "成果物がありません: $out" >&2
+    exit 1
+  fi
+  if ! go version -m "$out" | grep -q '^	build	CGO_ENABLED=0$'; then
+    echo "cgo が有効なままです: $out" >&2
+    exit 1
+  fi
+  echo "ok $out"
+done
+"""

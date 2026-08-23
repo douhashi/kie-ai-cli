@@ -35,6 +35,22 @@ Everything lives under `$XDG_DATA_HOME/kie-ai-cli`: the SQLite ledger, the
 downloaded catalog, and the configuration file. The API key is read from the
 environment first and from the configuration file otherwise.
 
+## Build
+
+[mise](https://mise.jdx.dev/) pins the Go toolchain, so no separate Go
+installation is needed.
+
+```sh
+mise install     # install the pinned toolchain
+mise run build   # build dist/kie-ai-cli for this machine
+```
+
+`mise run build-all` cross-compiles for Linux, macOS and Windows (amd64 and
+arm64, except Windows). Every binary is built with `CGO_ENABLED=0`: no C
+compiler is involved and the result has no runtime dependencies.
+
+The development setup is described in `docs/development/setup.md`, in Japanese.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
