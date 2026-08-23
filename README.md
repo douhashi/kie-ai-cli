@@ -25,7 +25,9 @@ keeps a local ledger of everything it sent.
 - **A catalog generated from the docs.** Models, their endpoints and their input
   schemas are derived from the OpenAPI specifications embedded in the kie.ai
   documentation, so new models can be picked up without hand-written definitions.
-- **A single binary.** Written in Go, with the catalog baked in. Updating the
+- **A single binary.** Written in Go, with the catalog baked in, so every model
+  resolves with no network at all. The baked-in catalog records the day it was
+  generated, and a binary carrying one older than 90 days says so. Updating the
   catalog is an explicit command; nothing is fetched behind your back.
 
 ## Commands
