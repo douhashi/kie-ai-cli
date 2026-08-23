@@ -3,7 +3,10 @@ module github.com/douhashi/kie-ai-cli
 // 言語仕様の下限だけを宣言する。実際に使う版は mise.toml の [tools] が持つ。
 go 1.26
 
-require modernc.org/sqlite v1.57.0
+require (
+	gopkg.in/yaml.v3 v3.0.1
+	modernc.org/sqlite v1.57.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
