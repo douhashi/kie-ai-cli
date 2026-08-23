@@ -165,7 +165,7 @@ func commands() []command {
 			arg:     from(axisModel),
 		},
 		{
-			noun: "task", verb: "list", args: "[--status <status>]",
+			noun: "task", verb: "list", args: "[--status <status>] [--unsaved]",
 			summary: "List the tasks in the local ledger.",
 			bind:    bindTaskList,
 		},
@@ -173,6 +173,11 @@ func commands() []command {
 			noun: "task", verb: "refresh",
 			summary: "Ask kie.ai what became of the tasks that have not finished.",
 			bind:    noFlags(runTaskRefresh),
+		},
+		{
+			noun: "task", verb: "download", args: "<task-id> | --unsaved [--dir <path>]",
+			summary: "Save what a task produced, or everything not saved yet, into a directory.",
+			bind:    bindTaskDownload,
 		},
 	}
 }

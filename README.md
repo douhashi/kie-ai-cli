@@ -100,6 +100,26 @@ documentation alone would be written into the ledger as fact. Submitting to them
 is not restricted and their task IDs are kept, so they can be collected once
 their answers have been read against the live API.
 
+`task download` writes what a task produced into a directory — the current one
+unless `--dir` names another, which is made if it is not there. Each result is
+saved as `<task-id>-<n>`, with the extension the result URL carries or, failing
+that, the one the host declared for it. A task is saved whole or not at all: the
+paths reach the ledger only once every file is on disk, so a download
+interrupted half way is still a task with something left to save. What is
+already saved is not fetched again — a result was paid for and may have been
+edited since, and the ledger says where each one went.
+
+`--unsaved`, on `task download` and on `task list` alike, is every task that has
+produced something no path has been recorded for. A success with nothing behind
+it is not one of them: the lyrics endpoints answer with the words themselves, so
+such a task has no file to save and would otherwise sit in the listing for ever.
+
+Results are fetched with a plain unauthenticated GET, which is all the hosts
+serving them ask for; the API key is never sent to them. kie.ai will re-issue a
+link for a result, expiring twenty minutes later, and that is used only when the
+recorded URL is refused — once, because a result that has expired is refused
+however many links are issued for it.
+
 `file upload` takes a path on this machine or an http/https address, and prints
 the URL kie.ai stored the file under and nothing else, so that
 `kie task run <model> --image "$(kie file upload photo.png)"` is all it takes to
@@ -147,6 +167,13 @@ path: the SQLite ledger in `ledger.db`, the downloaded catalog in `catalog/`,
 and the configuration in `config/config.json`. A downloaded catalog is three
 files: the two that are published, and `index.tsv`, which is derived from them
 when they are downloaded and is what completion reads.
+
+What tasks produce does not live there. A generated image or video is the
+user's own work rather than this tool's state, so `task download` writes it into
+the current directory, or into the one `--dir` names, and never under the state
+directory. The ledger records the absolute path of every file it saved, which is
+how `--unsaved` knows what is left to collect — and it records the path it
+wrote, so moving the file afterwards does not make the task look uncollected.
 
 The API key is read from the `KIE_AI_API_KEY` environment variable first and
 from the configuration file otherwise, so a key can be given for a single

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/douhashi/kie-ai-cli/internal/kie"
 	_ "modernc.org/sqlite" // registers the cgo-free "sqlite" driver
 )
 
@@ -29,7 +30,7 @@ var ErrNotFound = errors.New("task not found")
 const timeLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
 // columns lists the task columns in the order scanTask reads them.
-const columns = `task_id, model_id, input, status, result_urls, error, created_at, updated_at`
+const columns = `task_id, model_id, input, status, result_urls, error, saved_paths, created_at, updated_at`
 
 // Task is one submitted task as the ledger holds it.
 type Task struct {
@@ -39,9 +40,12 @@ type Task struct {
 	Status     string
 	ResultURLs []string
 	// Error is why the task failed, empty for every other state.
-	Error     string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Error string
+	// SavedPaths is where what the task produced was written on this
+	// machine, empty for a task nothing has saved yet.
+	SavedPaths []string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Result is what a task turned out to be: the state a query reported, what it
@@ -96,9 +100,10 @@ func (l *Ledger) Add(ctx context.Context, taskID, modelID, status string, input 
 	now := timestamp()
 
 	// The task has produced nothing yet, so its result urls are the empty
-	// array and it has no reason to have failed for.
-	const query = `INSERT INTO tasks (` + columns + `) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-	if _, err := l.db.ExecContext(ctx, query, taskID, modelID, string(encoded), status, "[]", "", now, now); err != nil {
+	// array, it has no reason to have failed for, and there is nothing of
+	// it on disk.
+	const query = `INSERT INTO tasks (` + columns + `) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	if _, err := l.db.ExecContext(ctx, query, taskID, modelID, string(encoded), status, "[]", "", "[]", now, now); err != nil {
 		return fmt.Errorf("add task %s: %w", taskID, err)
 	}
 	return nil
@@ -124,16 +129,41 @@ func (l *Ledger) Get(ctx context.Context, taskID string) (Task, error) {
 // A status that no task is in gives an empty listing rather than every task,
 // so that a question about one state is never answered with another.
 func (l *Ledger) List(ctx context.Context, statuses ...string) ([]Task, error) {
+	return l.list(ctx, nil, nil, statuses)
+}
+
+// unsavedWhere selects the tasks that produced something no path has been
+// recorded for.
+//
+// A success with no result urls is not one of them. The lyrics endpoint
+// answers with the words themselves and records no file, so a task of that
+// kind has nothing to save and would sit in the listing for ever -- which is
+// the one thing a listing of what is left to do must not do.
+const unsavedWhere = `status = ? AND result_urls <> '[]' AND saved_paths = '[]'`
+
+// ListUnsaved returns the tasks that produced something this machine does not
+// have a copy of, newest first, narrowed further by statuses when given.
+func (l *Ledger) ListUnsaved(ctx context.Context, statuses ...string) ([]Task, error) {
+	return l.list(ctx, []string{unsavedWhere}, []any{kie.StatusSucceeded}, statuses)
+}
+
+// list runs one listing: the conditions given, and the statuses asked for.
+//
+// conditions and args are positional, so an argument belongs to the condition
+// at the same place in the clause; the status filter is appended after both.
+func (l *Ledger) list(ctx context.Context, conditions []string, args []any, statuses []string) ([]Task, error) {
 	// rowid breaks ties so that two tasks recorded in the same instant still
 	// come back in a stable, newest-first order.
 	query := `SELECT ` + columns + ` FROM tasks`
-	args := make([]any, 0, len(statuses))
 	if len(statuses) > 0 {
 		placeholders := make([]string, len(statuses))
 		for i, status := range statuses {
 			placeholders[i], args = "?", append(args, status)
 		}
-		query += ` WHERE status IN (` + strings.Join(placeholders, ", ") + `)`
+		conditions = append(conditions, `status IN (`+strings.Join(placeholders, ", ")+`)`)
+	}
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, " AND ")
 	}
 	query += ` ORDER BY created_at DESC, rowid DESC`
 
@@ -187,6 +217,36 @@ func (l *Ledger) Update(ctx context.Context, taskID string, result Result) error
 	return nil
 }
 
+// MarkSaved records where what a task produced was written to. The paths are
+// what makes a task saved, so recording none of them is refused: it would
+// write the value that means the opposite.
+//
+// updated_at moves with them. What the ledger holds about the task has
+// changed, which is what that column has always meant.
+func (l *Ledger) MarkSaved(ctx context.Context, taskID string, paths []string) error {
+	if len(paths) == 0 {
+		return fmt.Errorf("mark task %s saved: no paths were saved", taskID)
+	}
+	encoded, err := json.Marshal(paths)
+	if err != nil {
+		return fmt.Errorf("mark task %s saved: encode saved paths: %w", taskID, err)
+	}
+
+	const query = `UPDATE tasks SET saved_paths = ?, updated_at = ? WHERE task_id = ?`
+	res, err := l.db.ExecContext(ctx, query, string(encoded), timestamp(), taskID)
+	if err != nil {
+		return fmt.Errorf("mark task %s saved: %w", taskID, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("mark task %s saved: %w", taskID, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("mark task %s saved: %w", taskID, ErrNotFound)
+	}
+	return nil
+}
+
 // scanner is what sql.Row and sql.Rows have in common.
 type scanner interface {
 	Scan(dest ...any) error
@@ -194,11 +254,11 @@ type scanner interface {
 
 func scanTask(s scanner) (Task, error) {
 	var (
-		task                 Task
-		input, resultURLs    string
-		createdAt, updatedAt string
+		task                          Task
+		input, resultURLs, savedPaths string
+		createdAt, updatedAt          string
 	)
-	if err := s.Scan(&task.TaskID, &task.ModelID, &input, &task.Status, &resultURLs, &task.Error, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&task.TaskID, &task.ModelID, &input, &task.Status, &resultURLs, &task.Error, &savedPaths, &createdAt, &updatedAt); err != nil {
 		return Task{}, err
 	}
 	if err := json.Unmarshal([]byte(input), &task.Input); err != nil {
@@ -206,6 +266,9 @@ func scanTask(s scanner) (Task, error) {
 	}
 	if err := json.Unmarshal([]byte(resultURLs), &task.ResultURLs); err != nil {
 		return Task{}, fmt.Errorf("decode result urls of %s: %w", task.TaskID, err)
+	}
+	if err := json.Unmarshal([]byte(savedPaths), &task.SavedPaths); err != nil {
+		return Task{}, fmt.Errorf("decode saved paths of %s: %w", task.TaskID, err)
 	}
 	var err error
 	if task.CreatedAt, err = parseTime(createdAt); err != nil {
