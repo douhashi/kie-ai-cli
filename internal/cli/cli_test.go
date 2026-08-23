@@ -195,6 +195,7 @@ func TestUsageErrors(t *testing.T) {
 		{name: "missing value", args: []string{"config", "set", "api_key"}},
 		{name: "empty value", args: []string{"config", "set", "api_key", ""}},
 		{name: "too many arguments", args: []string{"config", "show", "extra"}},
+		{name: "credits with an argument", args: []string{"credits", "show", "extra"}},
 		{name: "unknown flag", args: []string{"config", "show", "--nope"}},
 		{name: "version with an argument", args: []string{"--version", "extra"}},
 	}
@@ -226,7 +227,7 @@ func TestUsageListsEveryCommand(t *testing.T) {
 	if got.code != 0 {
 		t.Fatalf("no arguments: code %d, stderr %q", got.code, got.stderr)
 	}
-	for _, want := range []string{"config set <key> <value>", "config show", "--json", "--version"} {
+	for _, want := range []string{"config set <key> <value>", "config show", "credits show", "--json", "--version"} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("usage lacks %q:\n%s", want, got.stdout)
 		}
@@ -269,10 +270,17 @@ func TestRuntimeErrorIsNotAUsageError(t *testing.T) {
 // Any longer run of the key appearing anywhere is a leak.
 func assertNoLeak(t *testing.T, out string) {
 	t.Helper()
+	assertKeyNotIn(t, secret, out)
+}
+
+// assertKeyNotIn is assertNoLeak for a key the test did not choose, which is
+// the shape the e2e tests need: they run with the real key.
+func assertKeyNotIn(t *testing.T, key, out string) {
+	t.Helper()
 	const allowed = 4
-	for i := 0; i+allowed < len(secret); i++ {
-		if run := secret[i : i+allowed+1]; strings.Contains(out, run) {
-			t.Errorf("output contains %q, a run of the key longer than the %d characters the mask keeps:\n%s", run, allowed, out)
+	for i := 0; i+allowed < len(key); i++ {
+		if run := key[i : i+allowed+1]; strings.Contains(out, run) {
+			t.Errorf("output contains a run of the key longer than the %d characters the mask keeps:\n%s", allowed, out)
 		}
 	}
 }
