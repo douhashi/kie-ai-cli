@@ -1,0 +1,15 @@
+# Environment variables
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# direnv
+.envrc
+.envrc.*
+!.envrc.example
+!.envrc.sample
+.direnv/
+
+# Temp design notes
+.tmp/
