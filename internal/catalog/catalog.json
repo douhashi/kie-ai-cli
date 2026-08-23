@@ -12628,6 +12628,7 @@
           }
         },
         "required": [
+          "callBackUrl",
           "taskId"
         ],
         "type": "object"
@@ -12897,6 +12898,7 @@
           }
         },
         "required": [
+          "callBackUrl",
           "prompt"
         ],
         "type": "object"

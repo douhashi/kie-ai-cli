@@ -146,7 +146,10 @@ func TestTaskRunSubmitsAMarketModel(t *testing.T) {
 func TestTaskRunSubmitsAStandardAPI(t *testing.T) {
 	layout, stub := submitter(t)
 
-	got := run(t, "task", "run", "suno-api/generate-lyrics", "--prompt", "a song about rain", "--json")
+	// This model takes a callBackUrl because kie.ai refuses the request
+	// without one; the CLI never invents it (#33).
+	got := run(t, "task", "run", "suno-api/generate-lyrics",
+		"--prompt", "a song about rain", "--callBackUrl", "https://example.test/hook", "--json")
 	if got.code != 0 {
 		t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
 	}
@@ -163,7 +166,7 @@ func TestTaskRunSubmitsAStandardAPI(t *testing.T) {
 	if stub.path != "/api/v1/lyrics" {
 		t.Errorf("path = %q, want the endpoint of this API", stub.path)
 	}
-	want := map[string]any{"prompt": "a song about rain"}
+	want := map[string]any{"prompt": "a song about rain", "callBackUrl": "https://example.test/hook"}
 	if canonical(t, stub.body) != canonical(t, want) {
 		t.Errorf("body = %s, want the input itself: %s", canonical(t, stub.body), canonical(t, want))
 	}
