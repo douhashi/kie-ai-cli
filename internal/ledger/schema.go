@@ -28,6 +28,13 @@ var migrations = [][]string{
 			updated_at  TEXT NOT NULL
 		) STRICT`,
 	},
+	{ // v2: why a task failed.
+		//
+		// A status alone says a task is over but not what to do about it,
+		// and kie.ai keeps no record this tool can go back to: the reason
+		// arrives once, in the answer to the query that saw the failure.
+		`ALTER TABLE tasks ADD COLUMN error TEXT NOT NULL DEFAULT ''`,
+	},
 }
 
 // migrate brings db up to the last version in ms, applying only what it has

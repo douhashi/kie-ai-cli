@@ -11,6 +11,7 @@ import (
 
 	"github.com/douhashi/kie-ai-cli/internal/cli"
 	"github.com/douhashi/kie-ai-cli/internal/config"
+	"github.com/douhashi/kie-ai-cli/internal/kie"
 	"github.com/douhashi/kie-ai-cli/internal/ledger"
 	"github.com/douhashi/kie-ai-cli/internal/paths"
 )
@@ -131,8 +132,8 @@ func TestTaskRunSubmitsAMarketModel(t *testing.T) {
 	if task.ModelID != "qwen/text-to-image" {
 		t.Errorf("model_id = %q, want the model that was run", task.ModelID)
 	}
-	if task.Status != ledger.StatusSubmitted {
-		t.Errorf("status = %q, want %q", task.Status, ledger.StatusSubmitted)
+	if task.Status != kie.StatusSubmitted {
+		t.Errorf("status = %q, want %q", task.Status, kie.StatusSubmitted)
 	}
 	// The ledger holds the input, not the envelope: a Market task and a
 	// standard-API task have to read the same way afterwards.
@@ -381,7 +382,7 @@ func TestTaskRunPrintsTheIDEvenWhenTheLedgerRefusesIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ledger.Open: %v", err)
 	}
-	if err := l.Add(t.Context(), submittedID, "qwen/text-to-image", ledger.StatusSubmitted, nil); err != nil {
+	if err := l.Add(t.Context(), submittedID, "qwen/text-to-image", kie.StatusSubmitted, nil); err != nil {
 		t.Fatalf("ledger.Add: %v", err)
 	}
 	if err := l.Close(); err != nil {

@@ -85,8 +85,20 @@ been opened, so a required field that is missing, or a ledger that cannot be
 written to, costs nothing. Once a task exists its ID is printed even if
 recording it afterwards fails: it is the only handle on what was bought.
 
-Nothing waits for a result. `task refresh` polls the tasks that are still
-running and updates the ledger; `task list` only reads the ledger.
+Nothing waits for a result. `task refresh` asks kie.ai about every task that
+has not finished yet and writes down what it says; `task list` only reads the
+ledger, and reports at the end how many of its rows may already be out of date.
+A task is `submitted`, `running`, `succeeded` or `failed`: kie.ai describes each
+family of models in a vocabulary of its own, and those four are what they are
+normalised to.
+
+Three query endpoints are understood, which covers 145 of the 161 models in the
+catalog. `task refresh` names the rest by task ID and endpoint and leaves their
+rows exactly as they were, rather than guessing: the same field means "failed"
+on one endpoint and "still generating" on another, so a reading taken from the
+documentation alone would be written into the ledger as fact. Submitting to them
+is not restricted and their task IDs are kept, so they can be collected once
+their answers have been read against the live API.
 
 `file upload` takes a path on this machine or an http/https address, and prints
 the URL kie.ai stored the file under and nothing else, so that

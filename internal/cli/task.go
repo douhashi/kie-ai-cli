@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/douhashi/kie-ai-cli/internal/catalog"
+	"github.com/douhashi/kie-ai-cli/internal/kie"
 	"github.com/douhashi/kie-ai-cli/internal/ledger"
 )
 
@@ -98,7 +99,7 @@ func runTaskRun(e *env, m catalog.Model, schema inputSchema, fields []*field, do
 	if err != nil {
 		return err
 	}
-	if err := l.Add(ctx, taskID, m.ID, ledger.StatusSubmitted, input); err != nil {
+	if err := l.Add(ctx, taskID, m.ID, kie.StatusSubmitted, input); err != nil {
 		// The task exists and has been paid for. Its id is the only
 		// handle on it, so it goes to stdout even now; what failed is
 		// reported beside it, on the other stream, and carries the id

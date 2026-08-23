@@ -2,11 +2,13 @@ package ledger
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -81,7 +83,7 @@ func TestListEmpty(t *testing.T) {
 	}
 }
 
-func TestUpdateStatus(t *testing.T) {
+func TestUpdate(t *testing.T) {
 	ctx := context.Background()
 	l := openTemp(t)
 	if err := l.Add(ctx, "task-1", "veo3", "submitted", nil); err != nil {
@@ -93,8 +95,8 @@ func TestUpdateStatus(t *testing.T) {
 	}
 
 	urls := []string{"https://example.com/a.mp4", "https://example.com/b.mp4"}
-	if err := l.UpdateStatus(ctx, "task-1", "succeeded", urls); err != nil {
-		t.Fatalf("UpdateStatus() error: %v", err)
+	if err := l.Update(ctx, "task-1", Result{Status: "succeeded", ResultURLs: urls}); err != nil {
+		t.Fatalf("Update() error: %v", err)
 	}
 
 	got, err := l.Get(ctx, "task-1")
@@ -115,10 +117,87 @@ func TestUpdateStatus(t *testing.T) {
 	}
 }
 
-func TestUpdateStatusUnknownTask(t *testing.T) {
-	err := openTemp(t).UpdateStatus(context.Background(), "missing", "succeeded", nil)
+// A failure leaves a reason behind, and a task that later succeeds must not
+// keep the reason of the attempt before it.
+func TestUpdateRecordsAndClearsTheReason(t *testing.T) {
+	ctx := context.Background()
+	l := openTemp(t)
+	if err := l.Add(ctx, "task-1", "veo3", "submitted", nil); err != nil {
+		t.Fatalf("Add() error: %v", err)
+	}
+
+	if err := l.Update(ctx, "task-1", Result{Status: "failed", Error: "400: no"}); err != nil {
+		t.Fatalf("Update() error: %v", err)
+	}
+	got, err := l.Get(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if got.Error != "400: no" {
+		t.Errorf("Error = %q, want the reason that was recorded", got.Error)
+	}
+
+	if err := l.Update(ctx, "task-1", Result{Status: "succeeded"}); err != nil {
+		t.Fatalf("Update() error: %v", err)
+	}
+	if got, err = l.Get(ctx, "task-1"); err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	if got.Error != "" {
+		t.Errorf("Error = %q, want it cleared", got.Error)
+	}
+}
+
+func TestUpdateUnknownTask(t *testing.T) {
+	err := openTemp(t).Update(context.Background(), "missing", Result{Status: "succeeded"})
 	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("UpdateStatus() error = %v, want ErrNotFound", err)
+		t.Fatalf("Update() error = %v, want ErrNotFound", err)
+	}
+}
+
+// task refresh asks for the tasks that may still move, and task list --status
+// asks for one state, so the filter has to answer both without the caller
+// reading the whole ledger and sifting it.
+func TestListFiltersByStatus(t *testing.T) {
+	ctx := context.Background()
+	l := openTemp(t)
+	for id, status := range map[string]string{
+		"task-1": "submitted", "task-2": "running", "task-3": "succeeded",
+	} {
+		if err := l.Add(ctx, id, "veo3", status, nil); err != nil {
+			t.Fatalf("Add(%s) error: %v", id, err)
+		}
+	}
+
+	tasks, err := l.List(ctx, "submitted", "running")
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	got := []string{}
+	for _, task := range tasks {
+		got = append(got, task.TaskID)
+	}
+	slices.Sort(got)
+	if want := []string{"task-1", "task-2"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("List(submitted, running) ids = %v, want %v", got, want)
+	}
+}
+
+// A filter that matches nothing is an empty listing, not every row: the caller
+// asked a question, and answering a different one would read as an answer.
+func TestListWithAStatusNothingIsIn(t *testing.T) {
+	ctx := context.Background()
+	l := openTemp(t)
+	if err := l.Add(ctx, "task-1", "veo3", "submitted", nil); err != nil {
+		t.Fatalf("Add() error: %v", err)
+	}
+
+	tasks, err := l.List(ctx, "failed")
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("List(failed) = %v, want empty", tasks)
 	}
 }
 
@@ -334,5 +413,44 @@ func TestDSNEscapesThePath(t *testing.T) {
 		"?_pragma=busy_timeout%285000%29&_pragma=journal_mode%28WAL%29&_pragma=foreign_keys%281%29"
 	if got != want {
 		t.Errorf("dsn() = %s, want %s", got, want)
+	}
+}
+
+// V5: a ledger written before the reason column existed is carried forward
+// rather than started over, and its rows read back with an empty reason.
+func TestOpenMigratesAVersionOneLedger(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "ledger.db")
+
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if err := migrate(ctx, db, migrations[:1]); err != nil {
+		t.Fatalf("migrate to v1: %v", err)
+	}
+	const insert = `INSERT INTO tasks (task_id, model_id, input, status, result_urls, created_at, updated_at)
+		VALUES ('task-1', 'veo3', '{"prompt":"a cat"}', 'submitted', '[]', ?, ?)`
+	now := timestamp()
+	if _, err := db.ExecContext(ctx, insert, now, now); err != nil {
+		t.Fatalf("insert a v1 row: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	l := open(t, path)
+	if v := schemaVersion(t, l); v != len(migrations) {
+		t.Errorf("user_version = %d, want %d", v, len(migrations))
+	}
+	got, err := l.Get(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("Get() after migration error: %v", err)
+	}
+	if !reflect.DeepEqual(got.Input, map[string]any{"prompt": "a cat"}) {
+		t.Errorf("Input = %v, want it preserved", got.Input)
+	}
+	if got.Error != "" {
+		t.Errorf("Error = %q, want the column to default to empty", got.Error)
 	}
 }

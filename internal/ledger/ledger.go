@@ -20,11 +20,6 @@ import (
 	_ "modernc.org/sqlite" // registers the cgo-free "sqlite" driver
 )
 
-// StatusSubmitted is a task kie.ai has accepted and that nothing has asked
-// about since. It is the only state this build records; the rest of the
-// vocabulary belongs to the command that polls for results.
-const StatusSubmitted = "submitted"
-
 // ErrNotFound reports that the ledger holds no task with the given id.
 var ErrNotFound = errors.New("task not found")
 
@@ -34,7 +29,7 @@ var ErrNotFound = errors.New("task not found")
 const timeLayout = "2006-01-02T15:04:05.000000000Z07:00"
 
 // columns lists the task columns in the order scanTask reads them.
-const columns = `task_id, model_id, input, status, result_urls, created_at, updated_at`
+const columns = `task_id, model_id, input, status, result_urls, error, created_at, updated_at`
 
 // Task is one submitted task as the ledger holds it.
 type Task struct {
@@ -43,8 +38,19 @@ type Task struct {
 	Input      map[string]any
 	Status     string
 	ResultURLs []string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// Error is why the task failed, empty for every other state.
+	Error     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// Result is what a task turned out to be: the state a query reported, what it
+// produced, and why it failed. The three travel together because they are read
+// out of one answer and only make sense as one.
+type Result struct {
+	Status     string
+	ResultURLs []string
+	Error      string
 }
 
 // Ledger is an open task ledger.
@@ -89,9 +95,10 @@ func (l *Ledger) Add(ctx context.Context, taskID, modelID, status string, input 
 	}
 	now := timestamp()
 
-	// The task has produced nothing yet, so its result urls are the empty array.
-	const query = `INSERT INTO tasks (` + columns + `) VALUES (?, ?, ?, ?, ?, ?, ?)`
-	if _, err := l.db.ExecContext(ctx, query, taskID, modelID, string(encoded), status, "[]", now, now); err != nil {
+	// The task has produced nothing yet, so its result urls are the empty
+	// array and it has no reason to have failed for.
+	const query = `INSERT INTO tasks (` + columns + `) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	if _, err := l.db.ExecContext(ctx, query, taskID, modelID, string(encoded), status, "[]", "", now, now); err != nil {
 		return fmt.Errorf("add task %s: %w", taskID, err)
 	}
 	return nil
@@ -110,13 +117,27 @@ func (l *Ledger) Get(ctx context.Context, taskID string) (Task, error) {
 	return task, nil
 }
 
-// List returns every recorded task, newest first. The ledger holds one user's
-// own submissions, so it is small enough to hand back whole.
-func (l *Ledger) List(ctx context.Context) ([]Task, error) {
+// List returns the recorded tasks, newest first. With no status it returns
+// every one of them: the ledger holds one user's own submissions, so it is
+// small enough to hand back whole.
+//
+// A status that no task is in gives an empty listing rather than every task,
+// so that a question about one state is never answered with another.
+func (l *Ledger) List(ctx context.Context, statuses ...string) ([]Task, error) {
 	// rowid breaks ties so that two tasks recorded in the same instant still
 	// come back in a stable, newest-first order.
-	const query = `SELECT ` + columns + ` FROM tasks ORDER BY created_at DESC, rowid DESC`
-	rows, err := l.db.QueryContext(ctx, query)
+	query := `SELECT ` + columns + ` FROM tasks`
+	args := make([]any, 0, len(statuses))
+	if len(statuses) > 0 {
+		placeholders := make([]string, len(statuses))
+		for i, status := range statuses {
+			placeholders[i], args = "?", append(args, status)
+		}
+		query += ` WHERE status IN (` + strings.Join(placeholders, ", ") + `)`
+	}
+	query += ` ORDER BY created_at DESC, rowid DESC`
+
+	rows, err := l.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list tasks: %w", err)
 	}
@@ -136,24 +157,27 @@ func (l *Ledger) List(ctx context.Context) ([]Task, error) {
 	return tasks, nil
 }
 
-// UpdateStatus records what the task has become: its state and, once it has
-// finished, the URLs of what it produced.
-func (l *Ledger) UpdateStatus(ctx context.Context, taskID, status string, resultURLs []string) error {
-	if resultURLs == nil {
-		resultURLs = []string{}
+// Update records what a task turned out to be.
+//
+// Every field of the result is written, the reason included: a task that
+// succeeded on a later attempt would otherwise keep the reason of the one
+// before it and read as a failure that produced a result.
+func (l *Ledger) Update(ctx context.Context, taskID string, result Result) error {
+	if result.ResultURLs == nil {
+		result.ResultURLs = []string{}
 	}
-	encoded, err := json.Marshal(resultURLs)
+	encoded, err := json.Marshal(result.ResultURLs)
 	if err != nil {
 		return fmt.Errorf("update task %s: encode result urls: %w", taskID, err)
 	}
 	now := timestamp()
 
-	const query = `UPDATE tasks SET status = ?, result_urls = ?, updated_at = ? WHERE task_id = ?`
-	result, err := l.db.ExecContext(ctx, query, status, string(encoded), now, taskID)
+	const query = `UPDATE tasks SET status = ?, result_urls = ?, error = ?, updated_at = ? WHERE task_id = ?`
+	res, err := l.db.ExecContext(ctx, query, result.Status, string(encoded), result.Error, now, taskID)
 	if err != nil {
 		return fmt.Errorf("update task %s: %w", taskID, err)
 	}
-	affected, err := result.RowsAffected()
+	affected, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("update task %s: %w", taskID, err)
 	}
@@ -174,7 +198,7 @@ func scanTask(s scanner) (Task, error) {
 		input, resultURLs    string
 		createdAt, updatedAt string
 	)
-	if err := s.Scan(&task.TaskID, &task.ModelID, &input, &task.Status, &resultURLs, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&task.TaskID, &task.ModelID, &input, &task.Status, &resultURLs, &task.Error, &createdAt, &updatedAt); err != nil {
 		return Task{}, err
 	}
 	if err := json.Unmarshal([]byte(input), &task.Input); err != nil {

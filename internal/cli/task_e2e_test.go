@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/douhashi/kie-ai-cli/internal/config"
-	"github.com/douhashi/kie-ai-cli/internal/ledger"
+	"github.com/douhashi/kie-ai-cli/internal/kie"
 )
 
 // submitted is how long a submission is allowed to take. The command creates
@@ -89,8 +89,8 @@ func TestTaskRunSubmitsToTheRealAPI(t *testing.T) {
 			if task.ModelID != tt.model {
 				t.Errorf("model_id = %q, want %q", task.ModelID, tt.model)
 			}
-			if task.Status != ledger.StatusSubmitted {
-				t.Errorf("status = %q, want %q", task.Status, ledger.StatusSubmitted)
+			if task.Status != kie.StatusSubmitted {
+				t.Errorf("status = %q, want %q", task.Status, kie.StatusSubmitted)
 			}
 			// The ledger holds the input itself for both styles, so
 			// that a Market task and a standard-API task read the
