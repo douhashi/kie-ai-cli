@@ -237,7 +237,14 @@ func TestFetchSpacesItsRequests(t *testing.T) {
 	defer mu.Unlock()
 	slices.SortFunc(starts, func(a, b time.Time) int { return a.Compare(b) })
 	spread := starts[len(starts)-1].Sub(starts[0])
-	if want := time.Duration(len(urls)-1) * interval; spread < want {
+	// The limiter releases the first request at once and spaces the rest, so a
+	// perfect run is spread over exactly (n-1) intervals -- the most the server
+	// can ever observe. Every source of jitter (goroutine scheduling, the clock's
+	// resolution, the handler's own lock) can only shorten what is measured here,
+	// so asserting the ideal makes the test a coin flip. One interval of slack
+	// keeps it a real check: a client that does not space at all lands near zero.
+	const slack = interval
+	if want := time.Duration(len(urls)-1)*interval - slack; spread < want {
 		t.Errorf("5 requests spread over %v, want at least %v", spread, want)
 	}
 }
