@@ -199,6 +199,8 @@ func TestUsageErrors(t *testing.T) {
 		{name: "model list with an argument", args: []string{"model", "list", "extra"}},
 		{name: "model show without a model", args: []string{"model", "show"}},
 		{name: "model show with two models", args: []string{"model", "show", "a/one", "b/two"}},
+		{name: "file upload without an argument", args: []string{"file", "upload"}},
+		{name: "file upload with two arguments", args: []string{"file", "upload", "a.png", "b.png"}},
 		{name: "unknown flag", args: []string{"config", "show", "--nope"}},
 		{name: "version with an argument", args: []string{"--version", "extra"}},
 	}
@@ -232,6 +234,7 @@ func TestUsageListsEveryCommand(t *testing.T) {
 	}
 	want := []string{
 		"config set <key> <value>", "config show", "credits show",
+		"file upload <path|url>",
 		"model list [--category <name>] [--vendor <name>]", "model show <model-id>",
 		"--json", "--version",
 	}

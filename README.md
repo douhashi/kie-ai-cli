@@ -62,6 +62,14 @@ read from a file or from standard input; flags override what the JSON sets.
 Nothing waits for a result. `task refresh` polls the tasks that are still
 running and updates the ledger; `task list` only reads the ledger.
 
+`file upload` takes a path on this machine or an http/https address, and prints
+the URL kie.ai stored the file under and nothing else, so that
+`kie task run <model> --image "$(kie file upload photo.png)"` is all it takes to
+use one. Every upload goes into a directory of its own: kie.ai addresses a
+stored file by its path and name together and has no endpoint that deletes one,
+so a second `photo.png` would otherwise take the place of the first. Uploads
+expire on their own after a few days.
+
 `--json` changes the output of a successful command. Errors are always plain
 text on stderr, distinguished by the exit code.
 
