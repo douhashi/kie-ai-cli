@@ -13,8 +13,22 @@ import (
 // dirName is the directory kie-ai-cli owns inside the data directory.
 const dirName = "kie-ai-cli"
 
-// ledgerName is the SQLite task ledger inside the root.
-const ledgerName = "ledger.db"
+// The names of what lives inside the root. The settings sit in their own
+// directory so that later files of the same kind have a home beside them.
+const (
+	ledgerName = "ledger.db"
+	configDir  = "config"
+	configName = "config.json"
+	catalogDir = "catalog"
+)
+
+// Layout is every location kie-ai-cli owns.
+type Layout struct {
+	Root    string
+	Config  string
+	Catalog string
+	Ledger  string
+}
 
 // Root returns the directory holding everything kie-ai-cli persists, creating
 // it if it does not exist yet. It is $XDG_DATA_HOME/kie-ai-cli, falling back
@@ -35,13 +49,29 @@ func Root() (string, error) {
 	return root, nil
 }
 
+// Resolve returns every location at once, creating the root. It is the only
+// answer to where each piece of state lives: a caller that resolved one of
+// them for itself could disagree with the rest about where the root is.
+func Resolve() (Layout, error) {
+	root, err := Root()
+	if err != nil {
+		return Layout{}, err
+	}
+	return Layout{
+		Root:    root,
+		Config:  filepath.Join(root, configDir, configName),
+		Catalog: filepath.Join(root, catalogDir),
+		Ledger:  filepath.Join(root, ledgerName),
+	}, nil
+}
+
 // Ledger returns the path of the SQLite task ledger, creating the root.
 func Ledger() (string, error) {
-	root, err := Root()
+	l, err := Resolve()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, ledgerName), nil
+	return l.Ledger, nil
 }
 
 func rootPath() (string, error) {

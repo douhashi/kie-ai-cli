@@ -26,6 +26,8 @@ jobs:
       - name: Lint
         run: mise run lint
 
+      # 外部 API を叩く疎通テスト（`e2e` タグ）は CI では走らせない。
+      # 中身は mise.toml [tasks.test] が持つ（CI 側で二重定義しない）。
       - name: Test
         run: mise run test
 
