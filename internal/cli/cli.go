@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/douhashi/kie-ai-cli/internal/paths"
 )
@@ -33,38 +35,65 @@ type command struct {
 	verb    string
 	args    string
 	summary string
-	run     func(*env, []string) error
+	// bind registers the flags this command takes of its own and returns the
+	// handler, which reads them once they are parsed. A command that takes no
+	// flags of its own is wrapped in noFlags.
+	bind func(*flag.FlagSet) handler
 }
 
-// env is what a handler is given: where to write its result, where the state
-// lives, and whether the caller asked for JSON.
+// handler runs one command against its environment and its positional
+// arguments.
+type handler func(*env, []string) error
+
+// noFlags adapts a handler that takes no flags beyond the ones every command
+// has.
+func noFlags(run handler) func(*flag.FlagSet) handler {
+	return func(*flag.FlagSet) handler { return run }
+}
+
+// env is what a handler is given: where to write its result and its warnings,
+// where the state lives, whether the caller asked for JSON, and what time it
+// is -- which is a value rather than a call so that the age of the built-in
+// catalog can be tested without waiting for it.
 type env struct {
 	stdout io.Writer
+	stderr io.Writer
 	paths  paths.Layout
 	json   bool
+	now    time.Time
 }
 
 var commands = []command{
 	{
 		noun: "config", verb: "set", args: "<key> <value>",
 		summary: "Set a configuration value.",
-		run:     runConfigSet,
+		bind:    noFlags(runConfigSet),
 	},
 	{
 		noun: "config", verb: "show",
 		summary: "Show the configuration and where the state is kept.",
-		run:     runConfigShow,
+		bind:    noFlags(runConfigShow),
 	},
 	{
 		noun: "credits", verb: "show",
 		summary: "Show the credit balance of the kie.ai account.",
-		run:     runCreditsShow,
+		bind:    noFlags(runCreditsShow),
+	},
+	{
+		noun: "model", verb: "list", args: "[--category <name>] [--vendor <name>]",
+		summary: "List the models built into this binary.",
+		bind:    bindModelList,
+	},
+	{
+		noun: "model", verb: "show", args: "<model-id>",
+		summary: "Show one model, its documentation and its input fields.",
+		bind:    noFlags(runModelShow),
 	},
 }
 
 // Run executes one invocation and reports the exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
-	err := dispatch(args, stdout)
+	err := dispatch(args, stdout, stderr)
 	var ue usageError
 	switch {
 	case err == nil:
@@ -78,7 +107,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-func dispatch(args []string, stdout io.Writer) error {
+func dispatch(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		fmt.Fprint(stdout, usage())
 		return nil
@@ -105,6 +134,7 @@ func dispatch(args []string, stdout io.Writer) error {
 	// The usage text is printed by Run, once, for every kind of misuse.
 	fs.SetOutput(io.Discard)
 	asJSON := fs.Bool("json", false, "print the result as JSON")
+	run := cmd.bind(fs)
 	positional, err := parseFlags(fs, args[2:])
 	if err != nil {
 		return usagef("%s %s: %v", cmd.noun, cmd.verb, err)
@@ -114,7 +144,7 @@ func dispatch(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return cmd.run(&env{stdout: stdout, paths: layout, json: *asJSON}, positional)
+	return run(&env{stdout: stdout, stderr: stderr, paths: layout, json: *asJSON, now: time.Now()}, positional)
 }
 
 func lookup(noun, verb string) *command {
@@ -146,6 +176,14 @@ func parseFlags(fs *flag.FlagSet, args []string) ([]string, error) {
 		positional = append(positional, rest[0])
 		args = rest[1:]
 	}
+}
+
+// writeJSON is how every command answers --json: one indented document, so
+// that the answers are the same shape to read and to diff.
+func writeJSON(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 // usageError is a mistake in how the command was called. It is shown with the

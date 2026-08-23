@@ -52,8 +52,9 @@ run = ["CGO_ENABLED=0 go build -trimpath -o dist/kie-ai-cli ."]
 
 [tasks.build-all]
 description = "配布対象の 3 OS 向けにクロスビルドし、成果物を検査する"
-# ビルドが通っただけでは「cgo 無しの単一バイナリ」を満たしたか分からないので、
-# 成果物の存在と記録された CGO_ENABLED をこのタスク自身で確認して落とす。
+# ビルドが通っただけでは「カタログを焼き込んだ cgo 無しの単一バイナリ」を
+# 満たしたか分からないので、成果物の存在・記録された CGO_ENABLED・
+# カタログの焼き込みをこのタスク自身で確認して落とす。
 run = """
 set -eu
 for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
@@ -68,6 +69,14 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
   fi
   if ! go version -m "$out" | grep -q '^	build	CGO_ENABLED=0$'; then
     echo "cgo が有効なままです: $out" >&2
+    exit 1
+  fi
+  # ビルドが通ってもカタログの焼き込みは落ちうる（#3 はここを見ておらず素通りした）。
+  # 既知のモデル ID が成果物の中に現れることを、成果物そのものに対して確認する。
+  # -a を付けるのは、grep 実装によってはバイナリ中の一致を報告せず
+  # 「焼き込まれているのに落ちる」ためで、テキストとして走査させる。
+  if ! grep -qa "bytedance/seedream-v4-text-to-image" "$out"; then
+    echo "モデルカタログが焼き込まれていません: $out" >&2
     exit 1
   fi
   echo "ok $out"

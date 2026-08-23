@@ -196,6 +196,9 @@ func TestUsageErrors(t *testing.T) {
 		{name: "empty value", args: []string{"config", "set", "api_key", ""}},
 		{name: "too many arguments", args: []string{"config", "show", "extra"}},
 		{name: "credits with an argument", args: []string{"credits", "show", "extra"}},
+		{name: "model list with an argument", args: []string{"model", "list", "extra"}},
+		{name: "model show without a model", args: []string{"model", "show"}},
+		{name: "model show with two models", args: []string{"model", "show", "a/one", "b/two"}},
 		{name: "unknown flag", args: []string{"config", "show", "--nope"}},
 		{name: "version with an argument", args: []string{"--version", "extra"}},
 	}
@@ -227,7 +230,12 @@ func TestUsageListsEveryCommand(t *testing.T) {
 	if got.code != 0 {
 		t.Fatalf("no arguments: code %d, stderr %q", got.code, got.stderr)
 	}
-	for _, want := range []string{"config set <key> <value>", "config show", "credits show", "--json", "--version"} {
+	want := []string{
+		"config set <key> <value>", "config show", "credits show",
+		"model list [--category <name>] [--vendor <name>]", "model show <model-id>",
+		"--json", "--version",
+	}
+	for _, want := range want {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("usage lacks %q:\n%s", want, got.stdout)
 		}
