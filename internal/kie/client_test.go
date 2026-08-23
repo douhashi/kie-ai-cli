@@ -21,24 +21,35 @@ const testKey = "kie-live-QRSTUVWX90ab7f31"
 const creditPath = "/api/v1/chat/credit"
 
 // stub stands in for kie.ai. It answers every request with one canned response
-// and keeps the last request, which is the only place the wire format of an
-// outgoing call can be checked.
+// and keeps the last request and the body it carried, which is the only place
+// the wire format of an outgoing call can be checked.
 type stub struct {
 	client *kie.Client
 	last   *http.Request
+	sent   []byte
 }
 
 func serve(t *testing.T, status int, body string) *stub {
 	t.Helper()
 	s := &stub{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Read before the clone: cloning shares the body, which is
+		// closed as soon as this handler returns.
+		sent, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("reading the request body: %v", err)
+		}
+		s.sent = sent
 		s.last = r.Clone(r.Context())
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, body)
 	}))
 	t.Cleanup(srv.Close)
-	s.client = &kie.Client{APIKey: testKey, BaseURL: srv.URL, HTTP: srv.Client()}
+	// Both hosts are this one server: which endpoint went where is
+	// asserted on by path, and TestNewPointsUploadsAtTheirOwnHost is what
+	// holds the two apart.
+	s.client = &kie.Client{APIKey: testKey, BaseURL: srv.URL, UploadBaseURL: srv.URL, HTTP: srv.Client()}
 	return s
 }
 
@@ -47,8 +58,15 @@ func TestNewPointsAtKieAI(t *testing.T) {
 	if c.BaseURL != "https://api.kie.ai" {
 		t.Errorf("BaseURL = %q, want the kie.ai API host", c.BaseURL)
 	}
-	if c.HTTP == nil || c.HTTP.Timeout == 0 {
-		t.Errorf("HTTP = %+v, want a client that gives up rather than hanging", c.HTTP)
+	// The time limit is no longer on the shared client: one value there
+	// would have to bound both a short read and the sending of a 100MB
+	// file. Each call sets its own instead, which the internal test in
+	// timeout_test.go is what keeps them from forgetting to do.
+	if c.HTTP == nil {
+		t.Fatal("HTTP is nil")
+	}
+	if c.HTTP.Timeout != 0 {
+		t.Errorf("HTTP.Timeout = %s, want the limit to belong to each call", c.HTTP.Timeout)
 	}
 	if c.APIKey != testKey {
 		t.Errorf("APIKey = %q, want the key it was built with", c.APIKey)

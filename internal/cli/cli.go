@@ -89,6 +89,11 @@ var commands = []command{
 		summary: "Show one model, its documentation and its input fields.",
 		bind:    noFlags(runModelShow),
 	},
+	{
+		noun: "file", verb: "upload", args: "<path|url>",
+		summary: "Upload a local file or a URL and print its download URL.",
+		bind:    noFlags(runFileUpload),
+	},
 }
 
 // Run executes one invocation and reports the exit code.
