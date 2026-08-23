@@ -51,6 +51,10 @@ kie file upload <path|url>
 kie credits show
 ```
 
+`model list` prints one line per model — ID, category, vendor and name — and
+`model show` adds the documentation link and every input field with its type,
+whether it is required, its default and the values it accepts.
+
 `task run` takes the model ID as a positional argument and its inputs as flags
 derived from the catalog. `--input` accepts the same inputs as a JSON document,
 read from a file or from standard input; flags override what the JSON sets.

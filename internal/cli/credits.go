@@ -49,9 +49,7 @@ type creditsResult struct {
 
 func writeCredits(w io.Writer, balance json.Number, asJSON bool) error {
 	if asJSON {
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		return enc.Encode(creditsResult{Credits: balance})
+		return writeJSON(w, creditsResult{Credits: balance})
 	}
 	// One row, tab-separated like config show, so that cut(1) reaches the
 	// value without the caller having to ask for JSON.

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"text/tabwriter"
 
@@ -125,7 +124,5 @@ func writeStateJSON(e *env) error {
 	if err != nil {
 		return err
 	}
-	enc := json.NewEncoder(e.stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(s)
+	return writeJSON(e.stdout, s)
 }
