@@ -332,10 +332,21 @@ func usage() string {
 	return b.String()
 }
 
+// releaseVersion is the tag a release build was cut from. The release
+// pipeline stamps it in with -ldflags -X; it is empty in every other build,
+// which is why version falls back to what the toolchain recorded.
+//
+// It is not a constant kept in sync by hand: nothing in the source names a
+// version, so a build can never claim a version it was not cut as.
+var releaseVersion string
+
 // version reports the version stamped into the binary at build time.
-// The Go toolchain derives it from the module version or the VCS state, so
-// there is no version constant to keep in sync with the release tags.
+// A published binary carries the tag it was released as. Otherwise the Go
+// toolchain answers, deriving it from the module version or the VCS state.
 func version() string {
+	if releaseVersion != "" {
+		return releaseVersion
+	}
 	info, ok := debug.ReadBuildInfo()
 	if !ok || info.Main.Version == "" {
 		return "unknown"

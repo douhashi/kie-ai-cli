@@ -51,18 +51,34 @@ description = "手元の OS/アーキテクチャ向けに単一バイナリを�
 run = ["CGO_ENABLED=0 go build -trimpath -o dist/kie-ai-cli ."]
 
 [tasks.build-all]
-description = "配布対象の 3 OS 向けにクロスビルドし、成果物を検査する"
+description = "配布対象の 3 OS 向けにクロスビルドし、成果物を検査してチェックサムを作る"
 # ビルドが通っただけでは「カタログを焼き込んだ cgo 無しの単一バイナリ」を
 # 満たしたか分からないので、成果物の存在・記録された CGO_ENABLED・
 # カタログの焼き込みをこのタスク自身で確認して落とす。
+#
+# 公開する成果物を作るのもこのタスクである（.github/workflows/release.yml は
+# KIE_AI_VERSION を渡して呼ぶだけ）。版の焼き込みもチェックサムの生成も
+# ここに置くことで、PR の CI が毎回同じ経路を通り、リリース手順だけが
+# タグを打つまで未検証で残ることがなくなる。
 run = """
 set -eu
+# 版は Release だけが名乗る。手元と PR のビルドでは空のままで、
+# 成果物は従来どおり Go ツールチェーンが記録した版を返す。
+version="${KIE_AI_VERSION:-}"
+ldflags=""
+if [ -n "$version" ]; then
+  ldflags="-X github.com/douhashi/kie-ai-cli/internal/cli.releaseVersion=$version"
+fi
+# クロスビルドした成果物は動かせないが、手元の OS/アーキ向けの 1 つだけは
+# 動かせる。焼き込みの検査を文字列の一致で終わらせないために使う。
+host_goos=$(go env GOOS)
+host_goarch=$(go env GOARCH)
 for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
   goos="${target%/*}"
   goarch="${target#*/}"
   out="dist/kie-ai-cli_${goos}_${goarch}"
   if [ "$goos" = windows ]; then out="${out}.exe"; fi
-  CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -o "$out" .
+  CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "$ldflags" -o "$out" .
   if [ ! -f "$out" ]; then
     echo "成果物がありません: $out" >&2
     exit 1
@@ -87,6 +103,38 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
     echo "補完の索引が焼き込まれていません: $out" >&2
     exit 1
   fi
+  # 版を渡されたなら、5 つすべてに入っていること。-X は綴りを間違えた
+  # シンボルを黙って捨てるので、ビルドが通ったことは焼き込みの証拠にならない。
+  if [ -n "$version" ] && ! grep -qa "$version" "$out"; then
+    echo "版が焼き込まれていません: $out" >&2
+    exit 1
+  fi
+  # ただし文字列の一致だけでは足りない。依存の版（go.sum の v1.0.0 等）が
+  # 成果物に記録されており、タグ名と偶然一致しうる。動かせる 1 つについては
+  # --version が実際にそれを返すところまで確かめる。
+  if [ "$goos" = "$host_goos" ] && [ "$goarch" = "$host_goarch" ]; then
+    reported=$("$out" --version)
+    if [ -z "$reported" ]; then
+      echo "--version が何も返しません: $out" >&2
+      exit 1
+    fi
+    if [ -n "$version" ] && [ "$reported" != "$version" ]; then
+      echo "--version が版を返しません: $reported (期待は $version)" >&2
+      exit 1
+    fi
+  fi
   echo "ok $out"
 done
+# 取得側が dist/ の中で `sha256sum -c checksums.txt` をそのまま回せるよう、
+# 名前は dist/ からの相対にする。macOS には sha256sum が無いので shasum に落ちる。
+# `mise run build` の dist/kie-ai-cli は配布物ではないので glob から外れる。
+(
+  cd dist
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum kie-ai-cli_* > checksums.txt
+  else
+    shasum -a 256 kie-ai-cli_* > checksums.txt
+  fi
+)
+echo "ok dist/checksums.txt"
 """
