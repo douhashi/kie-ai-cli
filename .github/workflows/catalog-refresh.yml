@@ -7,6 +7,8 @@ on:
     # 03:27 JST（UTC 18:27）の日次。毎時 0 分を避けて Actions の混雑帯から外す。
     - cron: "27 18 * * *"
   workflow_dispatch:
+  push:
+    branches: [verify-5-diff]
 
 # 231 ページの巡回を重ねない。走行中の run を殺すと途中まで取った巡回が無駄になるので、
 # 打ち切りではなく待たせる。
