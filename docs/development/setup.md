@@ -41,6 +41,7 @@ infisical run -- <command>
 |---|---|
 | `mise run setup` | git hooks の導入 |
 | `mise run lint` | ドキュメントの書式契約と Go の静的検査 |
+| `mise run test` | Go のテスト（cgo 無し） |
 | `mise run build` | 手元向けの単一バイナリを `dist/` に作る |
 | `mise run build-all` | 配布対象の 3 OS 向けにクロスビルドし、成果物を検査する |
 
@@ -69,7 +70,7 @@ CI は PR で 2 つのジョブを回す。どちらも `mise install` の後に
 
 | ジョブ | 内容 |
 |---|---|
-| `check` | `mise run lint` |
+| `check` | `mise run lint` と `mise run test` |
 | `build` | `mise run build-all`。3 OS 分が壊れていないことを PR の時点で落とす |
 
 書式契約もビルドの前提も、レビューの目視ではなく **機械的に落とす**
