@@ -2,8 +2,10 @@
 
 An unofficial command-line interface for [kie.ai](https://kie.ai).
 
-> **Status:** design stage. Nothing is released yet. See `docs/business/overview.md`
-> for the concept and `docs/development/roadmap.md` for the plan.
+> **Status:** the commands below work, and binaries are published on the
+> [releases page](https://github.com/douhashi/kie-ai-cli/releases). See
+> `docs/business/overview.md` for the concept and `docs/development/roadmap.md`
+> for the plan.
 
 ## Why
 
@@ -29,6 +31,30 @@ keeps a local ledger of everything it sent.
   resolves with no network at all. The catalog records the day it was generated,
   and one older than 90 days says so. Updating the catalog is an explicit
   command; nothing is fetched behind your back.
+
+## Install
+
+Every release publishes one binary per platform and a `checksums.txt` covering
+all of them. Take the one for your machine, verify it, and put it on your
+`PATH` under the name `kie` — the name every example below types.
+
+```sh
+base=https://github.com/douhashi/kie-ai-cli/releases/latest/download
+curl -fLO "$base/kie-ai-cli_linux_amd64"
+curl -fLO "$base/checksums.txt"
+sha256sum --ignore-missing -c checksums.txt
+mkdir -p ~/.local/bin
+install -m 755 kie-ai-cli_linux_amd64 ~/.local/bin/kie
+```
+
+The other names are `kie-ai-cli_linux_arm64`, `kie-ai-cli_darwin_amd64`,
+`kie-ai-cli_darwin_arm64` and `kie-ai-cli_windows_amd64.exe`. macOS has no
+`sha256sum`; verify there with
+`grep kie-ai-cli_darwin_arm64 checksums.txt | shasum -a 256 -c`.
+
+With a Go toolchain at hand, `go install github.com/douhashi/kie-ai-cli@latest`
+builds the same program from source. It lands as `kie-ai-cli`, so rename or
+link it to `kie` to type the shorter name.
 
 ## Commands
 
@@ -193,8 +219,10 @@ mise run build   # build dist/kie-ai-cli for this machine
 ```
 
 `mise run build-all` cross-compiles for Linux, macOS and Windows (amd64 and
-arm64, except Windows). Every binary is built with `CGO_ENABLED=0`: no C
-compiler is involved and the result has no runtime dependencies.
+arm64, except Windows) and writes `dist/checksums.txt` over the result. Every
+binary is built with `CGO_ENABLED=0`: no C compiler is involved and the result
+has no runtime dependencies. This is the same task a release runs, with
+`KIE_AI_VERSION` set to the tag so that `--version` reports it.
 
 The development setup is described in `docs/development/setup.md`, in Japanese.
 

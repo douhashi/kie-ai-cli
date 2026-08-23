@@ -1,0 +1,60 @@
+name: Release
+
+# tag `v*` の push で、その版のバイナリ 5 件とチェックサムを Release に公開する。
+# 版の焼き込み・成果物の検査・チェックサムの生成はすべて mise.toml
+# [tasks.build-all] が持ち、ここは KIE_AI_VERSION を渡して呼ぶだけである
+# （CI 側で二重定義しない）。PR の CI が毎回同じタスクを通るので、
+# 公開の手順だけがタグを打つまで未検証で残ることがない。
+on:
+  push:
+    # 版を名乗る tag だけを対象にする。カタログの公開が使う固定 tag
+    # `catalog`（catalog-publish.yml）はここに掛からない。
+    tags: ['v*']
+
+# 同じ tag への公開を重ねない。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# contents: Release の作成と資産の upload。
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup mise
+        uses: jdx/mise-action@v4
+
+      # タグは main 以外にも打てる。公開する版がテストを通っていることは
+      # PR の CI に委ねず、この run 自身で確かめる。
+      - name: Test
+        run: mise run test
+
+      - name: Build release artifacts
+        env:
+          KIE_AI_VERSION: ${{ github.ref_name }}
+        run: mise run build-all
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # 既にあるなら作り直さない。upload の途中で失敗した run を
+          # 再実行したときに、ここで止まらず同じ状態へ収束させる。
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            # tag `catalog` の Release と混ざらないよう --latest を明示し、
+            # /releases/latest をこの版へ確定的に移す。README の入手手順は
+            # その URL を叩く。
+            gh release create "$TAG" --latest --generate-notes --title "$TAG"
+          fi
+          # バイナリを先に、チェックサムを後に上げる。逆にすると、2 つの
+          # upload の間に取得した人が「照合先はあるのに中身が無い」を見る。
+          gh release upload "$TAG" dist/kie-ai-cli_* --clobber
+          gh release upload "$TAG" dist/checksums.txt --clobber
