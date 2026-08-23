@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"text/tabwriter"
@@ -135,16 +136,18 @@ func filterModels(models []catalog.Model, category, vendor string) ([]catalog.Mo
 // valuesOf lists the distinct values the models carry for one axis, in lower
 // case and in order, which is the form both the comparison and the message use.
 func valuesOf(models []catalog.Model, of func(catalog.Model) string) []string {
-	seen := make(map[string]bool, len(models))
-	var out []string
-	for _, m := range models {
-		if v := strings.ToLower(of(m)); !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
+	return distinct(models, func(m catalog.Model) string { return strings.ToLower(of(m)) })
+}
+
+// distinct lists the values one axis takes across items, once each and in
+// order. It is what both a message naming the values and a shell offering them
+// to pick from are made of.
+func distinct[T any](items []T, of func(T) string) []string {
+	seen := make(map[string]bool, len(items))
+	for _, item := range items {
+		seen[of(item)] = true
 	}
-	slices.Sort(out)
-	return out
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // modelSummary is the JSON contract of model list: what identifies a model and

@@ -19,6 +19,10 @@ import (
 // name is how the tool refers to itself in the usage text and in messages.
 const name = "kie-ai-cli"
 
+// shortName is the other name the tool is installed under, and the one the
+// documentation types. Both are what a shell has to be told to complete.
+const shortName = "kie"
+
 const (
 	exitOK = 0
 	// exitError reports a command that was called correctly but failed.
@@ -28,8 +32,9 @@ const (
 )
 
 // command is one noun-verb pair. Every command the tool has is a row in
-// commands below: the dispatch table and the usage text are the same list, so
-// a command cannot exist without being documented.
+// commands below: the dispatch table, the usage text and what a shell
+// completes are the same list, so a command cannot exist without being
+// documented.
 type command struct {
 	noun    string
 	verb    string
@@ -44,6 +49,16 @@ type command struct {
 	// named in the first of them, and so cannot know its own flags until it
 	// has read that far.
 	bind func(*env, *flag.FlagSet, []string) (binding, error)
+	// noJSON marks a command whose answer is not a document: --json is not
+	// registered for it, so asking for it is refused like any other flag it
+	// does not have -- and `completion show` does not offer it either.
+	noJSON bool
+	// arg is where the words for the argument right after the verb come
+	// from, and flags the same for the value of a flag, by flag name. Both
+	// are read by `completion show` alone; a command with nothing to
+	// complete leaves them empty.
+	arg   candidates
+	flags map[string]candidates
 }
 
 // binding is what registering a command's flags produced: the handler to run
@@ -78,52 +93,78 @@ type env struct {
 	now    time.Time
 }
 
-var commands = []command{
-	{
-		noun: "catalog", verb: "update",
-		summary: "Download the published model catalog and read it from now on.",
-		bind:    noFlags(runCatalogUpdate),
-	},
-	{
-		noun: "catalog", verb: "show",
-		summary: "Show which model catalog is in effect and when it was generated.",
-		bind:    noFlags(runCatalogShow),
-	},
-	{
-		noun: "config", verb: "set", args: "<key> <value>",
-		summary: "Set a configuration value.",
-		bind:    noFlags(runConfigSet),
-	},
-	{
-		noun: "config", verb: "show",
-		summary: "Show the configuration and where the state is kept.",
-		bind:    noFlags(runConfigShow),
-	},
-	{
-		noun: "credits", verb: "show",
-		summary: "Show the credit balance of the kie.ai account.",
-		bind:    noFlags(runCreditsShow),
-	},
-	{
-		noun: "model", verb: "list", args: "[--category <name>] [--vendor <name>]",
-		summary: "List the models in the catalog in effect.",
-		bind:    bindModelList,
-	},
-	{
-		noun: "model", verb: "show", args: "<model-id>",
-		summary: "Show one model, its documentation and its input fields.",
-		bind:    noFlags(runModelShow),
-	},
-	{
-		noun: "file", verb: "upload", args: "<path|url>",
-		summary: "Upload a local file or a URL and print its download URL.",
-		bind:    noFlags(runFileUpload),
-	},
-	{
-		noun: "task", verb: "run", args: "<model-id> [--<field> <value>...] [--input <file|->]",
-		summary: "Submit a task to one model and print the task ID.",
-		bind:    bindTaskRun,
-	},
+// commands is every command the tool has, in the order the usage text lists
+// them.
+//
+// It is a function rather than a variable because `completion show` reads the
+// table to write its script: a variable whose handlers read that same variable
+// is an initialization cycle, which the compiler refuses.
+func commands() []command {
+	return []command{
+		{
+			noun: "catalog", verb: "update",
+			summary: "Download the published model catalog and read it from now on.",
+			bind:    noFlags(runCatalogUpdate),
+		},
+		{
+			noun: "catalog", verb: "show",
+			summary: "Show which model catalog is in effect and when it was generated.",
+			bind:    noFlags(runCatalogShow),
+		},
+		{
+			noun: "completion", verb: "show", args: "<bash|zsh>",
+			summary: "Print the shell completion script to load into that shell.",
+			bind:    noFlags(runCompletionShow),
+			noJSON:  true,
+			arg:     fixed(shellBash, shellZsh),
+		},
+		{
+			noun: "completion", verb: "list", args: "<model|category|vendor>",
+			summary: "List what one axis can be, one per line, for a shell to complete from.",
+			bind:    noFlags(runCompletionList),
+			noJSON:  true,
+			arg:     fixed(axisModel, axisCategory, axisVendor),
+		},
+		{
+			noun: "config", verb: "set", args: "<key> <value>",
+			summary: "Set a configuration value.",
+			bind:    noFlags(runConfigSet),
+			arg:     fixed(keyAPIKey),
+		},
+		{
+			noun: "config", verb: "show",
+			summary: "Show the configuration and where the state is kept.",
+			bind:    noFlags(runConfigShow),
+		},
+		{
+			noun: "credits", verb: "show",
+			summary: "Show the credit balance of the kie.ai account.",
+			bind:    noFlags(runCreditsShow),
+		},
+		{
+			noun: "model", verb: "list", args: "[--category <name>] [--vendor <name>]",
+			summary: "List the models in the catalog in effect.",
+			bind:    bindModelList,
+			flags:   map[string]candidates{"category": from(axisCategory), "vendor": from(axisVendor)},
+		},
+		{
+			noun: "model", verb: "show", args: "<model-id>",
+			summary: "Show one model, its documentation and its input fields.",
+			bind:    noFlags(runModelShow),
+			arg:     from(axisModel),
+		},
+		{
+			noun: "file", verb: "upload", args: "<path|url>",
+			summary: "Upload a local file or a URL and print its download URL.",
+			bind:    noFlags(runFileUpload),
+		},
+		{
+			noun: "task", verb: "run", args: "<model-id> [--<field> <value>...] [--input <file|->]",
+			summary: "Submit a task to one model and print the task ID.",
+			bind:    bindTaskRun,
+			arg:     from(axisModel),
+		},
+	}
 }
 
 // Run executes one invocation and reports the exit code.
@@ -174,10 +215,7 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	// and nothing reads it until the handler runs.
 	e := &env{stdin: stdin, stdout: stdout, stderr: stderr, paths: layout, now: time.Now()}
 
-	fs := flag.NewFlagSet(cmd.noun+" "+cmd.verb, flag.ContinueOnError)
-	// The usage text is printed by Run, once, for every kind of misuse.
-	fs.SetOutput(io.Discard)
-	asJSON := fs.Bool(flagJSON, false, "print the result as JSON")
+	fs, asJSON := newFlagSet(*cmd)
 	bound, err := cmd.bind(e, fs, args[2:])
 	if err != nil {
 		return err
@@ -195,10 +233,25 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	return bound.run(e, positional)
 }
 
+// newFlagSet builds the flags a command is parsed with before its own are
+// registered on top. It is what `completion show` reads them back from, so the
+// flags offered are the flags the command is given.
+func newFlagSet(c command) (*flag.FlagSet, *bool) {
+	fs := flag.NewFlagSet(c.noun+" "+c.verb, flag.ContinueOnError)
+	// The usage text is printed by Run, once, for every kind of misuse.
+	fs.SetOutput(io.Discard)
+	asJSON := new(bool)
+	if !c.noJSON {
+		fs.BoolVar(asJSON, flagJSON, false, "print the result as JSON")
+	}
+	return fs, asJSON
+}
+
 func lookup(noun, verb string) *command {
-	for i, c := range commands {
+	table := commands()
+	for i, c := range table {
 		if c.noun == noun && c.verb == verb {
-			return &commands[i]
+			return &table[i]
 		}
 	}
 	return nil
@@ -251,7 +304,7 @@ func usage() string {
 
 	w := tabwriter.NewWriter(&b, 0, 0, 3, ' ', 0)
 	fmt.Fprintln(w, "Commands:")
-	for _, c := range commands {
+	for _, c := range commands() {
 		fmt.Fprintf(w, "  %s\t%s\n", strings.TrimRight(c.noun+" "+c.verb+" "+c.args, " "), c.summary)
 	}
 	fmt.Fprintln(w, "\nFlags:")

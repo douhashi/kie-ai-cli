@@ -105,21 +105,22 @@ func Load(dir string) (Catalog, error) {
 	return embedded, nil
 }
 
-// loadDir reads the downloaded pair, reporting false when dir holds neither
-// half of it. Holding one half is not an absence: it is an update that was
-// interrupted between its two renames, and the missing file is the one thing
-// that would go unnoticed.
+// loadDir reads the downloaded catalog, reporting false when dir holds none of
+// the three files it is made of. Holding some of them is not an absence: it is
+// an update that was interrupted between its renames, and the missing file is
+// the one thing that would go unnoticed. The index is only looked for, because
+// what it holds is [LoadIndex]'s to read.
 func loadDir(dir string) (Catalog, bool, error) {
 	catalogJSON, catalogErr := os.ReadFile(filepath.Join(dir, CatalogFile))
 	generatedAt, dateErr := os.ReadFile(filepath.Join(dir, GeneratedAtFile))
-	if errors.Is(catalogErr, fs.ErrNotExist) && errors.Is(dateErr, fs.ErrNotExist) {
+	_, indexErr := os.Stat(filepath.Join(dir, IndexFile))
+	if errors.Is(catalogErr, fs.ErrNotExist) && errors.Is(dateErr, fs.ErrNotExist) && errors.Is(indexErr, fs.ErrNotExist) {
 		return Catalog{}, false, nil
 	}
-	if catalogErr != nil {
-		return Catalog{}, false, unusable(dir, catalogErr)
-	}
-	if dateErr != nil {
-		return Catalog{}, false, unusable(dir, dateErr)
+	for _, err := range []error{catalogErr, dateErr, indexErr} {
+		if err != nil {
+			return Catalog{}, false, unusable(dir, err)
+		}
 	}
 	parsed, err := parse(catalogJSON, string(generatedAt))
 	if err != nil {

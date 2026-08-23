@@ -34,9 +34,9 @@ var maxAssetBytes int64 = 8 << 20
 
 // Update downloads the published catalog into dir and returns what it wrote.
 //
-// Nothing is written unless both assets arrive and this binary can read them:
-// a failed update leaves the catalog that was already there, so the CLI still
-// answers afterwards.
+// Nothing is written unless both assets arrive, this binary can read them and
+// the index can be derived from them: a failed update leaves the catalog that
+// was already there, so the CLI still answers afterwards.
 func Update(ctx context.Context, dir string) (Catalog, error) {
 	ctx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
@@ -60,7 +60,15 @@ func Update(ctx context.Context, dir string) (Catalog, error) {
 		return Catalog{}, errors.New("the published catalog holds no models")
 	}
 
-	if err := writePair(dir, catalogJSON, generatedAt); err != nil {
+	// Derived here rather than downloaded as a third asset: one fewer thing
+	// the publishing side can leave out, and an index that cannot disagree
+	// with the catalog it was read from.
+	index, err := RenderIndex(downloaded.Models)
+	if err != nil {
+		return Catalog{}, fmt.Errorf("the published catalog is unusable: %w", err)
+	}
+
+	if err := writeDownloaded(dir, catalogJSON, index, generatedAt); err != nil {
 		return Catalog{}, err
 	}
 	downloaded.Origin = OriginDownloaded
@@ -98,24 +106,27 @@ func download(ctx context.Context, name string) ([]byte, error) {
 	return body, nil
 }
 
-// writePair puts both files in place, or neither.
+// writeDownloaded puts all three files in place, or none of them.
 //
-// Both are written under temporary names first, so that a disk that fills up
+// They are written under temporary names first, so that a disk that fills up
 // half way through has not yet touched what was there. The renames that follow
 // are atomic one by one but not together, which is why the order matters.
-func writePair(dir string, catalogJSON, generatedAt []byte) error {
+func writeDownloaded(dir string, catalogJSON, index, generatedAt []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create the catalog directory %s: %w", dir, err)
 	}
-	// The catalog comes first in both passes. A reader arriving between the
-	// two renames then sees the new models under the old date, which
-	// understates how fresh the catalog is; the other order would have it
-	// claim a freshness it does not have.
+	// The date comes last in both passes, so that a reader arriving between
+	// two renames sees the new models under the old date, which understates
+	// how fresh the catalog is; the other order would have it claim a
+	// freshness it does not have. The index follows the catalog it is
+	// derived from for the same reason: the older index completes fewer
+	// models than the catalog holds, never models it does not.
 	files := []struct {
 		name    string
 		content []byte
 	}{
 		{CatalogFile, catalogJSON},
+		{IndexFile, index},
 		{GeneratedAtFile, generatedAt},
 	}
 	staged := make([]string, 0, len(files))

@@ -79,6 +79,14 @@ for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; d
     echo "モデルカタログが焼き込まれていません: $out" >&2
     exit 1
   fi
+  # 補完の索引は別ファイルで、焼き込みも別の embed である。カタログが入って
+  # いても索引が抜けうるので、索引の 1 行として成果物の中を確認する。
+  # タブを含むため printf で作る（$'\\t' は sh に無い）。
+  index_line=$(printf 'bytedance/seedream-v4-text-to-image\\timage\\tseedream')
+  if ! grep -qa "$index_line" "$out"; then
+    echo "補完の索引が焼き込まれていません: $out" >&2
+    exit 1
+  fi
   echo "ok $out"
 done
 """
