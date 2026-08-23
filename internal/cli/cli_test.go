@@ -26,8 +26,14 @@ type result struct {
 // run invokes the CLI against a state directory that only this test uses.
 func run(t *testing.T, args ...string) result {
 	t.Helper()
+	return runStdin(t, "", args...)
+}
+
+// runStdin is run for the one command that reads standard input.
+func runStdin(t *testing.T, stdin string, args ...string) result {
+	t.Helper()
 	var stdout, stderr bytes.Buffer
-	code := cli.Run(args, &stdout, &stderr)
+	code := cli.Run(args, strings.NewReader(stdin), &stdout, &stderr)
 	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}
 }
 
@@ -203,6 +209,7 @@ func TestUsageErrors(t *testing.T) {
 		{name: "model show with two models", args: []string{"model", "show", "a/one", "b/two"}},
 		{name: "file upload without an argument", args: []string{"file", "upload"}},
 		{name: "file upload with two arguments", args: []string{"file", "upload", "a.png", "b.png"}},
+		{name: "task run without a model", args: []string{"task", "run"}},
 		{name: "unknown flag", args: []string{"config", "show", "--nope"}},
 		{name: "version with an argument", args: []string{"--version", "extra"}},
 	}
@@ -238,6 +245,7 @@ func TestUsageListsEveryCommand(t *testing.T) {
 		"catalog update", "catalog show",
 		"config set <key> <value>", "config show", "credits show",
 		"file upload <path|url>",
+		"task run <model-id> [--<field> <value>...] [--input <file|->]",
 		"model list [--category <name>] [--vendor <name>]", "model show <model-id>",
 		"--json", "--version",
 	}

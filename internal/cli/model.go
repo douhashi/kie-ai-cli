@@ -12,12 +12,12 @@ import (
 	"github.com/douhashi/kie-ai-cli/internal/catalog"
 )
 
-func bindModelList(fs *flag.FlagSet) handler {
+func bindModelList(_ *env, fs *flag.FlagSet, _ []string) (binding, error) {
 	category := fs.String("category", "", "only the models in this category")
 	vendor := fs.String("vendor", "", "only the models from this vendor")
-	return func(e *env, args []string) error {
+	return binding{run: func(e *env, args []string) error {
 		return runModelList(e, args, *category, *vendor)
-	}
+	}}, nil
 }
 
 func runModelList(e *env, args []string, category, vendor string) error {
@@ -43,12 +43,23 @@ func runModelShow(e *env, args []string) error {
 	if err != nil {
 		return err
 	}
-	id := args[0]
+	m, err := findModel(c, args[0])
+	if err != nil {
+		return err
+	}
+	return writeModelShow(e.stdout, m, e.json)
+}
+
+// findModel looks a model up by the ID the user typed.
+//
+// A typo and a model this catalog is too old to know look exactly alike from
+// here, so the message names both ways forward.
+func findModel(c catalog.Catalog, id string) (catalog.Model, error) {
 	i := slices.IndexFunc(c.Models, func(m catalog.Model) bool { return m.ID == id })
 	if i < 0 {
-		return fmt.Errorf("unknown model %q: run `%s model list` to see every model ID", id, name)
+		return catalog.Model{}, fmt.Errorf("unknown model %q: run `%s model list` to see every model ID, or `%s catalog update` if it is newer than this catalog", id, name, name)
 	}
-	return writeModelShow(e.stdout, c.Models[i], e.json)
+	return c.Models[i], nil
 }
 
 // loadCatalog reads the catalog in effect -- the downloaded one if there is
@@ -265,54 +276,37 @@ var noteKeys = []string{
 	"minLength", "maxLength", "minItems", "maxItems",
 }
 
-// inputGroups flattens an input schema into what a caller has to supply.
-//
-// Nine of the catalog's schemas put alternatives in a oneOf or an anyOf at the
-// root, and four of those have no properties of their own: reading only the
-// properties would describe those models as taking no input at all.
+// inputGroups flattens an input schema into what a caller has to supply: the
+// fields the model always takes, and then each alternative it offers.
 func inputGroups(input map[string]any) []inputGroup {
+	s := newInputSchema(input)
 	var groups []inputGroup
-	if fields := fieldsOf(input); len(fields) > 0 {
+	if fields := fieldsOf(s.root); len(fields) > 0 {
 		groups = append(groups, inputGroup{fields: fields})
 	}
 	variant := 0
-	for _, branch := range append(branchesOf(input, "oneOf"), branchesOf(input, "anyOf")...) {
-		fields := fieldsOf(branch)
+	for _, b := range s.branches {
+		fields := fieldsOf(b.schema)
 		if len(fields) == 0 {
 			continue
 		}
 		variant++
 		label := fmt.Sprintf("one of (variant %d)", variant)
-		if title, ok := branch["title"].(string); ok && title != "" {
-			label = fmt.Sprintf("one of (variant %d: %s)", variant, title)
+		if b.title != "" {
+			label = fmt.Sprintf("one of (variant %d: %s)", variant, b.title)
 		}
 		groups = append(groups, inputGroup{label: label, fields: fields})
 	}
 	return groups
 }
 
-func branchesOf(input map[string]any, key string) []map[string]any {
-	raw, _ := input[key].([]any)
-	branches := make([]map[string]any, 0, len(raw))
-	for _, b := range raw {
-		if branch, ok := b.(map[string]any); ok {
-			branches = append(branches, branch)
-		}
-	}
-	return branches
-}
-
 // fieldsOf reads one object schema, required fields first: those are what the
 // caller must supply, and the rest only matters once they are known.
 func fieldsOf(schema map[string]any) []inputField {
-	properties, _ := schema["properties"].(map[string]any)
+	properties := propertiesOf(schema)
 	required := make(map[string]bool)
-	if names, ok := schema["required"].([]any); ok {
-		for _, n := range names {
-			if name, ok := n.(string); ok {
-				required[name] = true
-			}
-		}
+	for _, name := range requiredOf(schema) {
+		required[name] = true
 	}
 
 	fields := make([]inputField, 0, len(properties))
@@ -372,11 +366,6 @@ func renderValue(v any) string {
 		return fmt.Sprint(v)
 	}
 	return string(encoded)
-}
-
-func stringOf(v any) string {
-	s, _ := v.(string)
-	return s
 }
 
 // oneLine collapses the runs of whitespace a documentation string carries, so

@@ -27,6 +27,10 @@ type stub struct {
 	client *kie.Client
 	last   *http.Request
 	sent   []byte
+	// onRequest, when set, is called once per request reaching the stub,
+	// which is how a test counts what a client sent rather than only what
+	// it sent last.
+	onRequest func()
 }
 
 func serve(t *testing.T, status int, body string) *stub {
@@ -41,6 +45,9 @@ func serve(t *testing.T, status int, body string) *stub {
 		}
 		s.sent = sent
 		s.last = r.Clone(r.Context())
+		if s.onRequest != nil {
+			s.onRequest()
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_, _ = io.WriteString(w, body)

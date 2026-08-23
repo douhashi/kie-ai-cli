@@ -20,6 +20,11 @@ import (
 	_ "modernc.org/sqlite" // registers the cgo-free "sqlite" driver
 )
 
+// StatusSubmitted is a task kie.ai has accepted and that nothing has asked
+// about since. It is the only state this build records; the rest of the
+// vocabulary belongs to the command that polls for results.
+const StatusSubmitted = "submitted"
+
 // ErrNotFound reports that the ledger holds no task with the given id.
 var ErrNotFound = errors.New("task not found")
 

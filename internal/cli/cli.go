@@ -36,9 +36,23 @@ type command struct {
 	args    string
 	summary string
 	// bind registers the flags this command takes of its own and returns the
-	// handler, which reads them once they are parsed. A command that takes no
+	// handler that reads them once they are parsed. A command that takes no
 	// flags of its own is wrapped in noFlags.
-	bind func(*flag.FlagSet) handler
+	//
+	// It is given the raw arguments after the verb as well, because one
+	// command -- task run -- takes a flag per input field of the model
+	// named in the first of them, and so cannot know its own flags until it
+	// has read that far.
+	bind func(*env, *flag.FlagSet, []string) (binding, error)
+}
+
+// binding is what registering a command's flags produced: the handler to run
+// once they are parsed, and what to add to the message when one of them is
+// rejected. The hint is for task run, whose flags come from the catalog rather
+// than from the usage text and so cannot be listed there.
+type binding struct {
+	run  handler
+	hint string
 }
 
 // handler runs one command against its environment and its positional
@@ -47,15 +61,16 @@ type handler func(*env, []string) error
 
 // noFlags adapts a handler that takes no flags beyond the ones every command
 // has.
-func noFlags(run handler) func(*flag.FlagSet) handler {
-	return func(*flag.FlagSet) handler { return run }
+func noFlags(run handler) func(*env, *flag.FlagSet, []string) (binding, error) {
+	return func(*env, *flag.FlagSet, []string) (binding, error) { return binding{run: run}, nil }
 }
 
-// env is what a handler is given: where to write its result and its warnings,
-// where the state lives, whether the caller asked for JSON, and what time it
-// is -- which is a value rather than a call so that the age of the catalog in
-// effect can be tested without waiting for it.
+// env is what a handler is given: the three streams, where the state lives,
+// whether the caller asked for JSON, and what time it is -- which is a value
+// rather than a call so that the age of the catalog in effect can be tested
+// without waiting for it.
 type env struct {
+	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
 	paths  paths.Layout
@@ -104,11 +119,16 @@ var commands = []command{
 		summary: "Upload a local file or a URL and print its download URL.",
 		bind:    noFlags(runFileUpload),
 	},
+	{
+		noun: "task", verb: "run", args: "<model-id> [--<field> <value>...] [--input <file|->]",
+		summary: "Submit a task to one model and print the task ID.",
+		bind:    bindTaskRun,
+	},
 }
 
 // Run executes one invocation and reports the exit code.
-func Run(args []string, stdout, stderr io.Writer) int {
-	err := dispatch(args, stdout, stderr)
+func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	err := dispatch(args, stdin, stdout, stderr)
 	var ue usageError
 	switch {
 	case err == nil:
@@ -122,7 +142,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-func dispatch(args []string, stdout, stderr io.Writer) error {
+func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		fmt.Fprint(stdout, usage())
 		return nil
@@ -145,21 +165,34 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return usagef("unknown command: %s %s", args[0], args[1])
 	}
 
-	fs := flag.NewFlagSet(cmd.noun+" "+cmd.verb, flag.ContinueOnError)
-	// The usage text is printed by Run, once, for every kind of misuse.
-	fs.SetOutput(io.Discard)
-	asJSON := fs.Bool("json", false, "print the result as JSON")
-	run := cmd.bind(fs)
-	positional, err := parseFlags(fs, args[2:])
-	if err != nil {
-		return usagef("%s %s: %v", cmd.noun, cmd.verb, err)
-	}
-
 	layout, err := paths.Resolve()
 	if err != nil {
 		return err
 	}
-	return run(&env{stdout: stdout, stderr: stderr, paths: layout, json: *asJSON, now: time.Now()}, positional)
+	// Built before the flags are registered, because which flags a command
+	// has can depend on what is on disk. Only json is still unknown here,
+	// and nothing reads it until the handler runs.
+	e := &env{stdin: stdin, stdout: stdout, stderr: stderr, paths: layout, now: time.Now()}
+
+	fs := flag.NewFlagSet(cmd.noun+" "+cmd.verb, flag.ContinueOnError)
+	// The usage text is printed by Run, once, for every kind of misuse.
+	fs.SetOutput(io.Discard)
+	asJSON := fs.Bool(flagJSON, false, "print the result as JSON")
+	bound, err := cmd.bind(e, fs, args[2:])
+	if err != nil {
+		return err
+	}
+	positional, err := parseFlags(fs, args[2:])
+	if err != nil {
+		message := fmt.Sprintf("%s %s: %v", cmd.noun, cmd.verb, err)
+		if bound.hint != "" {
+			message += "; " + bound.hint
+		}
+		return usageError{msg: message}
+	}
+
+	e.json = *asJSON
+	return bound.run(e, positional)
 }
 
 func lookup(noun, verb string) *command {

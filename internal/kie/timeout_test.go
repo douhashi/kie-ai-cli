@@ -24,9 +24,17 @@ func TestEveryCallGivesUpWithoutTheCallerSettingADeadline(t *testing.T) {
 	}{
 		{
 			name:  "a read",
-			limit: &getTimeout,
+			limit: &callTimeout,
 			call: func(c *Client) error {
 				_, err := c.get(context.Background(), "/api/v1/chat/credit")
+				return err
+			},
+		},
+		{
+			name:  "a task submission",
+			limit: &callTimeout,
+			call: func(c *Client) error {
+				_, err := c.CreateTask(context.Background(), "/api/v1/jobs/createTask", map[string]any{})
 				return err
 			},
 		},
@@ -84,8 +92,8 @@ func TestEveryCallGivesUpWithoutTheCallerSettingADeadline(t *testing.T) {
 // answer, the upload carries the file. Sharing one limit is what forced the
 // move off http.Client in the first place.
 func TestAnUploadIsAllowedLongerThanARead(t *testing.T) {
-	if uploadTimeout <= getTimeout {
-		t.Errorf("uploadTimeout = %s, getTimeout = %s; an upload must be given more room", uploadTimeout, getTimeout)
+	if uploadTimeout <= callTimeout {
+		t.Errorf("uploadTimeout = %s, callTimeout = %s; an upload must be given more room", uploadTimeout, callTimeout)
 	}
 }
 
