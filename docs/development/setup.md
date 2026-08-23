@@ -17,6 +17,22 @@ mise run setup   # git hooks を導入し、開発を始められる状態にす
 導入手順を `[tasks.setup]` へ足す。**この 2 コマンドで環境が整う状態を保つ**
 （手順書に「あれも入れてください」を書き足さない）。
 
+## API キー
+
+kie.ai の API キーは [Infisical](https://infisical.com/) が持つ。`.infisical.json` が
+参照先のワークスペースを指すので、初回だけ認証する。
+
+```sh
+infisical login
+```
+
+以降、API キーを要するコマンドは `infisical run` 経由で実行する。
+シークレットを `.env` やシェルの環境変数に置かない。
+
+```sh
+infisical run -- <command>
+```
+
 ## タスク
 
 `mise tasks` で一覧できる。

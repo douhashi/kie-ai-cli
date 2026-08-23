@@ -4,6 +4,8 @@
 [tools]
 # git hooks ランナー。`mise run setup` が .git/hooks へ導入する。
 lefthook = "1.13.6"
+# シークレット注入。kie.ai の API キーは Infisical から `infisical run` で渡す。
+infisical = "0.43.125"
 
 [tasks.setup]
 description = "git hooks を導入し、開発を始められる状態にする"
