@@ -164,6 +164,16 @@ func commands() []command {
 			bind:    bindTaskRun,
 			arg:     from(axisModel),
 		},
+		{
+			noun: "task", verb: "list", args: "[--status <status>]",
+			summary: "List the tasks in the local ledger.",
+			bind:    bindTaskList,
+		},
+		{
+			noun: "task", verb: "refresh",
+			summary: "Ask kie.ai what became of the tasks that have not finished.",
+			bind:    noFlags(runTaskRefresh),
+		},
 	}
 }
 
