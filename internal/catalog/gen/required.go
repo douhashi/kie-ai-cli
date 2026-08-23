@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+
+	"github.com/douhashi/kie-ai-cli/internal/catalog"
 )
 
 // kie.ai says in prose that some properties must be sent on every request
@@ -71,11 +73,105 @@ func MeasuredRequired(model, property string) (required, pinned bool) {
 	return required, pinned
 }
 
+// A Market schema may name nothing as required at all: not the root object,
+// and not any of the alternatives offered beside it. Eleven of the catalog's
+// schemas take that shape, and for five of them it is only apparent -- their
+// oneOf branches do the requiring -- but the remaining six leave `task run`
+// with nothing to check a request against and say nothing about what the model
+// needs (#35).
+//
+// What those models really insist on is settled the same way as above and
+// recorded in the same shape, keyed by model rather than by property: the list
+// is what every request has to carry. An empty list is the measured answer
+// that no one property is -- either because the endpoint takes a request
+// carrying nothing at all, or because it wants one of several, which a flat
+// list cannot say and the endpoint's own 422 says instead.
+//
+// Unlike a disagreement, one of these that nobody has measured does not fail
+// the generation. Requiring nothing is the ordinary shape of a Market schema
+// rather than two upstream statements contradicting each other, Market models
+// turn over quickly, and stopping the crawl over one would hold the whole
+// catalog back until somebody has paid for a measurement. Leaving the list
+// empty errs the same way as leaving a required property optional: kie.ai
+// answers with the 422 that names what is missing, at no charge. So the
+// unmeasured models are reported instead -- see UnmeasuredInputRequired --
+// and the report rides in the pull request the scheduled crawl opens.
+var measuredInputRequired = map[string][]string{
+	// All four answered a request whose only field was an unreachable
+	// first_frame_url with a taskId, so neither the prompt nor the
+	// aspect_ratio their pages call a "Required field." is one: the task was
+	// created, failed fetching the image, and every credit held for it was
+	// given back. Asked with an empty input they answer 422 "Please fill in
+	// the text prompt or image, video, or audio" -- one of those, not all of
+	// them, which no flat list can say; #43 carries the alternation.
+	// #35, 2026-08-24.
+	"bytedance/seedance-2":      {},
+	"bytedance/seedance-2-5":    {},
+	"bytedance/seedance-2-fast": {},
+	"bytedance/seedance-2-mini": {},
+	// Both took an empty input object and answered with a taskId, so there
+	// is nothing a caller has to supply. Each task then failed upstream, one
+	// giving back all 14.4 credits held for it and the other all but 2.0.
+	// #35, 2026-08-24.
+	"grok-imagine-video-1-5-preview": {},
+	"grok-imagine/image-to-video":    {},
+}
+
+// MeasuredInputRequired reports what a request must carry for a model whose
+// input schema requires nothing, and whether anyone has measured it.
+func MeasuredInputRequired(model string) (required []string, pinned bool) {
+	required, pinned = measuredInputRequired[model]
+	return required, pinned
+}
+
+// RequiresNothing reports whether an input schema names no required property
+// anywhere a caller could satisfy: neither the root object nor any of the
+// alternatives beside it.
+//
+// oneOf and anyOf are the two the CLI reads as alternatives when it validates
+// a request, so they are the two that count as declaring a requirement here.
+func RequiresNothing(input map[string]any) bool {
+	if len(requiredNames(input)) > 0 {
+		return false
+	}
+	for _, keyword := range []string{"oneOf", "anyOf"} {
+		members, _ := input[keyword].([]any)
+		for _, member := range members {
+			object, ok := member.(map[string]any)
+			if ok && len(requiredNames(object)) > 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// UnmeasuredInputRequired names the models whose input schema requires nothing
+// and whose requirements nobody has measured, sorted. Those are the models
+// `task run` submits without checking anything first, so somebody has to be
+// told which they are.
+func UnmeasuredInputRequired(models []catalog.Model) []string {
+	var out []string
+	for _, model := range models {
+		if _, pinned := MeasuredInputRequired(model.ID); pinned {
+			continue
+		}
+		if RequiresNothing(model.Input) {
+			out = append(out, model.ID)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // correctRequired brings the input schema's required lists into line with the
 // measurements, and reports every disagreement that has none.
 func correctRequired(model string, input map[string]any) error {
 	var unmeasured []string
 	correctObject(model, input, &unmeasured)
+	// After the descriptions, because a correction they call for leaves the
+	// schema requiring something and so no longer silent.
+	applyMeasuredInputRequired(model, input)
 	if len(unmeasured) == 0 {
 		return nil
 	}
@@ -83,6 +179,22 @@ func correctRequired(model string, input map[string]any) error {
 	return fmt.Errorf(
 		"%s: described as required for every request but left out of required, and not measured: %v; send the request without it, and add what kie.ai answers to measured in internal/catalog/gen/required.go",
 		model, unmeasured)
+}
+
+// applyMeasuredInputRequired puts the measured requirements on a schema that
+// declares none of its own. A model nobody has measured is left as it is, and
+// so is one measured to take a request that carries nothing: an empty required
+// list is the same schema as no required list, and writing one would move a
+// line of the catalog for no change in meaning.
+func applyMeasuredInputRequired(model string, input map[string]any) {
+	if !RequiresNothing(input) {
+		return
+	}
+	required, pinned := MeasuredInputRequired(model)
+	if !pinned || len(required) == 0 {
+		return
+	}
+	input["required"] = sortedRequired(required)
 }
 
 // correctObject walks one object schema and the schemas below it, which is

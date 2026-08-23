@@ -36,8 +36,12 @@ jobs:
         uses: jdx/mise-action@v4
 
       # 想定外のページに当たると生成器が落ちる。落ちたことは後段の通知が拾う。
+      # 生成器は required をどこにも持たず実測もされていないモデルを stdout に
+      # 1 行ずつ出す（#35）。進捗は stderr なので、stdout をそのまま拾えばよい。
       - name: Regenerate catalog
-        run: mise run catalog
+        run: |
+          set -euo pipefail
+          mise run catalog | tee "$RUNNER_TEMP/unmeasured.txt"
 
       - name: Detect changes
         id: diff
@@ -81,14 +85,13 @@ jobs:
           # 前回の追従が取り込まれないまま次の巡回が来ても PR を積まない。
           git push --force origin "$HEAD_BRANCH"
 
-          if [ -n "$(gh pr list --head "$HEAD_BRANCH" --base "$BASE" --state open --json number --jq '.[].number')" ]; then
-            echo "既存の PR のブランチを更新した"
-            exit 0
+          # 未実測のモデルは日ごとに増減する。本文の一覧はその日の巡回の
+          # 結果でなければ意味が無いので、既存 PR でも本文を作り直す。
+          unmeasured="$(sed 's/^/- `/;s/$/`/' "$RUNNER_TEMP/unmeasured.txt")"
+          if [ -z "$unmeasured" ]; then
+            unmeasured="なし。"
           fi
-
-          gh pr create --base "$BASE" --head "$HEAD_BRANCH" \
-            --title "chore(catalog): docs.kie.ai の内容に追従する" \
-            --body "$(cat <<EOF
+          body="$(cat <<EOF
           \`mise run catalog\` の再生成で \`internal/catalog/\` に差分が出た。
 
           \`GITHUB_TOKEN\` が作った PR には CI が走らないため、検査は生成と同じジョブで通してある。
@@ -96,8 +99,27 @@ jobs:
           - \`mise run lint\`: 成功
           - \`mise run test\`: 成功
           - run: $RUN_URL
+
+          ## required を持たない未実測のモデル
+
+          次のモデルは入力スキーマが required をどこにも持たず、実測もされていない。
+          \`task run\` の送信前検証が効かないまま投入できる（#35）。実測して
+          \`internal/catalog/gen/required.go\` の表へ足す。
+
+          $unmeasured
           EOF
           )"
+
+          number="$(gh pr list --head "$HEAD_BRANCH" --base "$BASE" --state open --json number --jq '.[].number')"
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --body "$body"
+            echo "既存の PR のブランチと本文を更新した"
+            exit 0
+          fi
+
+          gh pr create --base "$BASE" --head "$HEAD_BRANCH" \
+            --title "chore(catalog): docs.kie.ai の内容に追従する" \
+            --body "$body"
 
       # 定期実行の失敗は誰も見ていないところで起きる。黙って終わらせない。
       - name: Report failure

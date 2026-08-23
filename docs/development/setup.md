@@ -60,6 +60,11 @@ infisical run -- go test -tags e2e ./...
 mise run catalog -- --pages-dir .tmp/catalog-pages
 ```
 
+生成器は `required` をどこにも持たず実測もされていないモデルの ID を **stdout** へ
+1 行ずつ出す（進捗や結果の報告は stderr）。`task run` の送信前検証が効かないまま
+投入できるモデルであり、日次の `catalog-refresh` がこれを PR 本文へ写す。実測して
+`internal/catalog/gen/required.go` の表へ足すと消える。
+
 生成結果が前回と 1 バイトも変わらないときは、**何も書かずに終わる**。
 変わったときだけ `catalog.json` と、隣の `internal/catalog/generated_at.txt`
 （実行日を UTC の `YYYY-MM-DD` で 1 行）を書き換える。定期実行が中身の変わらない
@@ -147,8 +152,9 @@ PR の検査とは別に、カタログの追従を 2 つのワークフロー�
 
 差分が無い日は PR を作らない。差分があった日は同じジョブで `mise run lint` と
 `mise run test` まで通してから PR を出す。`GITHUB_TOKEN` が作った PR には CI が
-走らないので、検査結果は PR 本文に残す。既に open な PR があればブランチの更新に
-留め、PR を積み上げない。
+走らないので、検査結果は PR 本文に残す。既に open な PR があればブランチと本文の
+更新に留め、PR を積み上げない。本文の「required を持たない未実測のモデル」は
+その日の巡回の結果なので、**既存 PR でも本文を作り直す**。
 
 どちらも失敗したら黙って終わらない。label `catalog-refresh` の open issue が
 無ければ run URL 付きで起票し、あればコメントを足す。**定期実行の失敗は誰も

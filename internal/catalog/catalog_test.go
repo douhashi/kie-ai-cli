@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -240,18 +241,28 @@ func TestStaleWarningNamesTheOrigin(t *testing.T) {
 	}
 }
 
+// requiredNames reads the names one object schema insists on, in the order it
+// lists them. The catalog is read straight from the committed JSON, so this is
+// the schema's own list rather than anything the generator says about it.
+func requiredNames(schema map[string]any) []string {
+	raw, _ := schema["required"].([]any)
+	names := make([]string, 0, len(raw))
+	for _, value := range raw {
+		if name, ok := value.(string); ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // walkObjects calls visit on every object schema reachable from schema,
 // together with the names it lists as required. The catalog is checked by
 // walking the committed JSON itself rather than by asking the generator, so a
 // rule that stopped being applied shows up here.
 func walkObjects(schema map[string]any, visit func(properties map[string]any, required map[string]bool)) {
 	required := map[string]bool{}
-	if raw, ok := schema["required"].([]any); ok {
-		for _, name := range raw {
-			if name, ok := name.(string); ok {
-				required[name] = true
-			}
-		}
+	for _, name := range requiredNames(schema) {
+		required[name] = true
 	}
 	properties, _ := schema["properties"].(map[string]any)
 	if properties != nil {
@@ -355,22 +366,68 @@ func TestCommittedCatalogLeavesConditionallyRequiredPropertiesOptional(t *testin
 			t.Errorf("%s is no longer in the catalog", id)
 			continue
 		}
-		required := map[string]bool{}
-		if raw, ok := model.Input["required"].([]any); ok {
-			for _, name := range raw {
-				if name, ok := name.(string); ok {
-					required[name] = true
-				}
-			}
-		}
+		required := requiredNames(model.Input)
 		properties, _ := model.Input["properties"].(map[string]any)
 		for _, name := range names {
 			if _, ok := properties[name]; !ok {
 				t.Errorf("%s: %s is no longer a property, so this case no longer guards anything", id, name)
 			}
-			if required[name] {
+			if slices.Contains(required, name) {
 				t.Errorf("%s: %s is required only under a condition and must not be listed as required", id, name)
 			}
+		}
+	}
+}
+
+// AC1, AC2: a Market input schema may name nothing as required at all --
+// neither the root object nor the alternatives beside it -- which leaves
+// `task run` nothing to check a request against. What those models really
+// insist on cannot be read off the page, so it is measured against the live
+// API and pinned in internal/catalog/gen/required.go, and the committed
+// catalog must hold what was measured.
+//
+// A model nobody has measured is not an error here. Requiring nothing is the
+// ordinary shape of a Market schema, the models turn over quickly, and the
+// under-strict side costs a 422 rather than a request kie.ai would have
+// taken; the crawl reports those models instead, see #35.
+func TestCommittedCatalogAgreesWithTheMeasuredInputRequirements(t *testing.T) {
+	// The six that declared nothing when this was written. Naming them keeps
+	// the check from passing because the catalog no longer holds any.
+	silent := []string{
+		"bytedance/seedance-2",
+		"bytedance/seedance-2-5",
+		"bytedance/seedance-2-fast",
+		"bytedance/seedance-2-mini",
+		"grok-imagine-video-1-5-preview",
+		"grok-imagine/image-to-video",
+	}
+	models := committed(t).Models
+	byID := map[string]catalog.Model{}
+	for _, model := range models {
+		byID[model.ID] = model
+	}
+	for _, id := range silent {
+		if _, ok := byID[id]; !ok {
+			t.Errorf("%s is no longer in the catalog", id)
+			continue
+		}
+		if _, pinned := gen.MeasuredInputRequired(id); !pinned {
+			t.Errorf("%s: requires nothing of its own and nobody has measured what it needs", id)
+		}
+	}
+
+	for _, model := range models {
+		want, pinned := gen.MeasuredInputRequired(model.ID)
+		if !pinned {
+			continue
+		}
+		want = slices.Compact(slices.Sorted(slices.Values(want)))
+		got := requiredNames(model.Input)
+		if len(got) == 0 && len(want) == 0 {
+			continue
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: the catalog requires %v, but a request was measured to need %v", model.ID, got, want)
 		}
 	}
 }

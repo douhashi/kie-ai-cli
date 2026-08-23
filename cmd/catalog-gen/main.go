@@ -79,6 +79,16 @@ func run(ctx context.Context, opts options) error {
 		return err
 	}
 
+	// The models `task run` has nothing to check a request against go to
+	// stdout, alone, while everything else this command says goes to stderr:
+	// the scheduled crawl copies them into the pull request it opens, which
+	// is where anyone finds out that one is running unchecked (#35). They are
+	// reported whether or not the catalog changed, because a model stays
+	// unmeasured on the days nothing about it moves.
+	for _, model := range gen.UnmeasuredInputRequired(built.Models) {
+		fmt.Println(model)
+	}
+
 	// Nothing is written until here: a catalog missing whatever failed would be
 	// worse than the one already on disk.
 	rendered, err := render(built)
