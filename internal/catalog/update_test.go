@@ -107,6 +107,40 @@ func TestUpdateWritesThePublishedPair(t *testing.T) {
 	}
 }
 
+// AC3: after an update the shell completes the models that were downloaded.
+// The index is derived from the catalog rather than published beside it, so
+// there is no third asset that can be missing or disagree with the other two.
+func TestUpdateDerivesTheIndexFromTheCatalogItDownloaded(t *testing.T) {
+	serve(t, map[string][]byte{
+		CatalogFile:     published(t, SchemaVersion, oneModel()),
+		GeneratedAtFile: []byte("2026-08-24\n"),
+	})
+	dir := t.TempDir()
+
+	if _, err := Update(context.Background(), dir); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	want, err := RenderIndex(oneModel())
+	if err != nil {
+		t.Fatalf("RenderIndex: %v", err)
+	}
+	read, err := os.ReadFile(filepath.Join(dir, IndexFile))
+	if err != nil {
+		t.Fatalf("read %s: %v", IndexFile, err)
+	}
+	if string(read) != string(want) {
+		t.Errorf("%s is %q, want the index of the catalog that was downloaded", IndexFile, read)
+	}
+
+	entries, err := LoadIndex(dir)
+	if err != nil {
+		t.Fatalf("LoadIndex after Update: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ID != theirID {
+		t.Errorf("the index holds %+v, want only %s", entries, theirID)
+	}
+}
+
 // A failed update leaves the catalog that was already there: a user whose
 // download fails keeps a working CLI, and one who has never downloaded keeps
 // the embedded catalog rather than a directory of rubble.
@@ -151,6 +185,16 @@ func TestUpdateFailuresLeaveTheCatalogAlone(t *testing.T) {
 			name:   "the date is not a date",
 			assets: map[string][]byte{CatalogFile: good, GeneratedAtFile: []byte("2026-08\n")},
 			want:   "read " + GeneratedAtFile,
+		},
+		{
+			// The index is derived rather than downloaded, so a catalog it
+			// cannot be derived from is caught here rather than by the shell.
+			name: "a model the index cannot hold",
+			assets: map[string][]byte{
+				CatalogFile:     published(t, SchemaVersion, []Model{{ID: "acme/one\ttwo", Category: "image", Vendor: "acme"}}),
+				GeneratedAtFile: []byte("2026-08-24\n"),
+			},
+			want: IndexFile,
 		},
 		{
 			name:   "the download is cut short",

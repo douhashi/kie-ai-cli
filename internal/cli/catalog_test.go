@@ -27,27 +27,31 @@ type catalogState struct {
 const newModelID = "acme/published-after-this-build"
 
 // download puts a catalog of one model where the CLI keeps the downloaded one,
-// which is the state `catalog update` leaves behind.
+// which is the state `catalog update` leaves behind: the two published files
+// and the index derived from them.
 func download(t *testing.T, layout paths.Layout, generatedAt string) {
 	t.Helper()
-	encoded, err := json.Marshal(catalog.Catalog{
-		SchemaVersion: catalog.SchemaVersion,
-		Models: []catalog.Model{{
-			ID: newModelID, Name: "Published After", Category: "image", Vendor: "acme",
-			DocsURL: "https://docs.kie.ai/acme",
-			Create:  catalog.Create{Method: "POST", Path: "/api/v1/jobs", Style: catalog.StyleMarket, Model: newModelID},
-			Query:   catalog.Query{Method: "GET", Path: "/api/v1/jobs", Param: "taskId"},
-			Input:   map[string]any{"type": "object"},
-		}},
-	})
+	models := []catalog.Model{{
+		ID: newModelID, Name: "Published After", Category: "image", Vendor: "acme",
+		DocsURL: "https://docs.kie.ai/acme",
+		Create:  catalog.Create{Method: "POST", Path: "/api/v1/jobs", Style: catalog.StyleMarket, Model: newModelID},
+		Query:   catalog.Query{Method: "GET", Path: "/api/v1/jobs", Param: "taskId"},
+		Input:   map[string]any{"type": "object"},
+	}}
+	encoded, err := json.Marshal(catalog.Catalog{SchemaVersion: catalog.SchemaVersion, Models: models})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
+	}
+	index, err := catalog.RenderIndex(models)
+	if err != nil {
+		t.Fatalf("RenderIndex: %v", err)
 	}
 	if err := os.MkdirAll(layout.Catalog, 0o700); err != nil {
 		t.Fatalf("create %s: %v", layout.Catalog, err)
 	}
 	for name, content := range map[string][]byte{
 		catalog.CatalogFile:     encoded,
+		catalog.IndexFile:       index,
 		catalog.GeneratedAtFile: []byte(generatedAt + "\n"),
 	} {
 		if err := os.WriteFile(filepath.Join(layout.Catalog, name), content, 0o600); err != nil {

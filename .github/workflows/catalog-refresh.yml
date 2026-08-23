@@ -43,9 +43,10 @@ jobs:
         id: diff
         run: |
           set -euo pipefail
-          CATALOG_PATHS=(internal/catalog/catalog.json internal/catalog/generated_at.txt)
+          CATALOG_PATHS=(internal/catalog/catalog.json internal/catalog/index.tsv internal/catalog/generated_at.txt)
           # 生成器は catalog.json のバイト列が変わったときだけ generated_at.txt も
-          # 書き替える（#3）。片方だけ見ると日付の更新が取り残される。
+          # 書き替える（#3）。索引 index.tsv はカタログからの導出物で、単独でも
+          # 書き替わりうる（#15）。1 つだけ見ると残りの更新が取り残される。
           if git diff --quiet -- "${CATALOG_PATHS[@]}"; then
             echo "カタログに差分なし"
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -76,7 +77,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$HEAD_BRANCH"
           git commit -m "chore(catalog): docs.kie.ai の内容に追従する" \
-            -- internal/catalog/catalog.json internal/catalog/generated_at.txt
+            -- internal/catalog/catalog.json internal/catalog/index.tsv internal/catalog/generated_at.txt
           # 前回の追従が取り込まれないまま次の巡回が来ても PR を積まない。
           git push --force origin "$HEAD_BRANCH"
 

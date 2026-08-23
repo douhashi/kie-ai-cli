@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -83,6 +84,81 @@ func TestRunWritesTheCatalog(t *testing.T) {
 	if !strings.Contains(string(written), "bytedance/seedream-v4-text-to-image") {
 		t.Errorf("catalog does not hold the model: %s", written)
 	}
+}
+
+// The shell completes from an index rather than from the catalog, and a
+// generator that wrote only one of the two would have them disagree from the
+// commit that produced them.
+func TestRunWritesTheIndexBesideTheCatalog(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "catalog.json")
+	if err := run(t.Context(), options{indexURL: twoModelSite(t), out: out, concurrency: 2, interval: time.Microsecond, now: testNow}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got, want := readIndex(t, out), indexOf(t, out); got != want {
+		t.Errorf("%s is\n%s\nwant the index of the catalog beside it:\n%s", catalog.IndexFile, got, want)
+	}
+}
+
+// An index that has gone missing is written even though the catalog it is
+// derived from has not changed -- and the date, which describes the catalog
+// rather than the index, stays where it was.
+func TestRunWritesTheIndexWhenOnlyItIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "catalog.json")
+	pages := filepath.Join(dir, "pages")
+	first := options{indexURL: twoModelSite(t), out: out, pagesDir: pages, concurrency: 2, interval: time.Microsecond, now: testNow}
+	if err := run(t.Context(), first); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	want := readIndex(t, out)
+	if err := os.Remove(filepath.Join(dir, catalog.IndexFile)); err != nil {
+		t.Fatalf("remove the index: %v", err)
+	}
+
+	second := first
+	second.now = testNow.AddDate(0, 0, 40)
+	if err := run(t.Context(), second); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if got := readIndex(t, out); got != want {
+		t.Errorf("%s is\n%s\nwant what the first run wrote:\n%s", catalog.IndexFile, got, want)
+	}
+	stamp, err := os.ReadFile(filepath.Join(dir, catalog.GeneratedAtFile))
+	if err != nil {
+		t.Fatalf("read %s: %v", catalog.GeneratedAtFile, err)
+	}
+	if want := "2026-08-23\n"; string(stamp) != want {
+		t.Errorf("%s moved to %q though the catalog did not change, want %q", catalog.GeneratedAtFile, stamp, want)
+	}
+}
+
+// readIndex reads the index written beside the catalog at out.
+func readIndex(t *testing.T, out string) string {
+	t.Helper()
+	read, err := os.ReadFile(filepath.Join(filepath.Dir(out), catalog.IndexFile))
+	if err != nil {
+		t.Fatalf("read %s: %v", catalog.IndexFile, err)
+	}
+	return string(read)
+}
+
+// indexOf renders the index of the catalog written to out, which is what the
+// file beside it has to hold.
+func indexOf(t *testing.T, out string) string {
+	t.Helper()
+	written, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read catalog: %v", err)
+	}
+	var parsed catalog.Catalog
+	if err := json.Unmarshal(written, &parsed); err != nil {
+		t.Fatalf("decode the catalog that was written: %v", err)
+	}
+	rendered, err := catalog.RenderIndex(parsed.Models)
+	if err != nil {
+		t.Fatalf("RenderIndex: %v", err)
+	}
+	return string(rendered)
 }
 
 // AC3: a page the generator cannot read stops the run, and whatever catalog is
@@ -214,6 +290,10 @@ func TestRunTouchesNothingWhenTheCatalogIsUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat %s: %v", catalog.GeneratedAtFile, err)
 	}
+	indexBefore, err := os.Stat(filepath.Join(dir, catalog.IndexFile))
+	if err != nil {
+		t.Fatalf("stat %s: %v", catalog.IndexFile, err)
+	}
 
 	second := first
 	second.now = testNow.AddDate(0, 0, 40)
@@ -234,6 +314,13 @@ func TestRunTouchesNothingWhenTheCatalogIsUnchanged(t *testing.T) {
 	}
 	if !stampAfter.ModTime().Equal(stampBefore.ModTime()) {
 		t.Errorf("%s was rewritten though the catalog did not change", catalog.GeneratedAtFile)
+	}
+	indexAfter, err := os.Stat(filepath.Join(dir, catalog.IndexFile))
+	if err != nil {
+		t.Fatalf("stat %s: %v", catalog.IndexFile, err)
+	}
+	if !indexAfter.ModTime().Equal(indexBefore.ModTime()) {
+		t.Errorf("%s was rewritten though the catalog did not change", catalog.IndexFile)
 	}
 	stamp, err := os.ReadFile(stampPath)
 	if err != nil {

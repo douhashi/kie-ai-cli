@@ -247,6 +247,7 @@ func TestUsageListsEveryCommand(t *testing.T) {
 		"file upload <path|url>",
 		"task run <model-id> [--<field> <value>...] [--input <file|->]",
 		"model list [--category <name>] [--vendor <name>]", "model show <model-id>",
+		"completion show <bash|zsh>", "completion list <model|category|vendor>",
 		"--json", "--version",
 	}
 	for _, want := range want {

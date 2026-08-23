@@ -35,8 +35,9 @@ func downloadedJSON(t *testing.T, schemaVersion int) []byte {
 	return encoded
 }
 
-// writePair puts one catalog and its generation date where Load looks for them.
-func writePair(t *testing.T, dir string, catalogJSON []byte, generatedAt string) {
+// writeDownloaded puts a downloaded catalog where Load looks for it: the two
+// published files and the index `catalog update` derives beside them.
+func writeDownloaded(t *testing.T, dir string, catalogJSON []byte, generatedAt string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("create %s: %v", dir, err)
@@ -44,6 +45,7 @@ func writePair(t *testing.T, dir string, catalogJSON []byte, generatedAt string)
 	for name, content := range map[string][]byte{
 		catalog.CatalogFile:     catalogJSON,
 		catalog.GeneratedAtFile: []byte(generatedAt),
+		catalog.IndexFile:       indexFor(t, catalogJSON),
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), content, 0o600); err != nil {
 			t.Fatalf("write %s: %v", name, err)
@@ -51,11 +53,27 @@ func writePair(t *testing.T, dir string, catalogJSON []byte, generatedAt string)
 	}
 }
 
+// indexFor renders the index of a catalog the way an update does. A catalog
+// that is deliberately unreadable gets one plausible line instead: what those
+// tests are about is the file beside it, which still has to be there.
+func indexFor(t *testing.T, catalogJSON []byte) []byte {
+	t.Helper()
+	var parsed catalog.Catalog
+	if err := json.Unmarshal(catalogJSON, &parsed); err != nil {
+		return []byte(downloadedID + "\timage\tacme\n")
+	}
+	rendered, err := catalog.RenderIndex(parsed.Models)
+	if err != nil {
+		t.Fatalf("RenderIndex: %v", err)
+	}
+	return rendered
+}
+
 // AC1: once a catalog has been downloaded it is the one that answers, so a
 // model added since this binary was built can be run.
 func TestLoadPrefersTheDownloadedCatalog(t *testing.T) {
 	dir := t.TempDir()
-	writePair(t, dir, downloadedJSON(t, catalog.SchemaVersion), "2026-08-20\n")
+	writeDownloaded(t, dir, downloadedJSON(t, catalog.SchemaVersion), "2026-08-20\n")
 
 	got, err := catalog.Load(dir)
 	if err != nil {
@@ -114,26 +132,26 @@ func TestLoadRejectsABrokenDownloadedCatalog(t *testing.T) {
 		{
 			name: "the catalog file is not JSON",
 			place: func(t *testing.T, dir string) {
-				writePair(t, dir, []byte("{"), "2026-08-20\n")
+				writeDownloaded(t, dir, []byte("{"), "2026-08-20\n")
 			},
 		},
 		{
 			name: "the catalog is of another schema version",
 			place: func(t *testing.T, dir string) {
-				writePair(t, dir, downloadedJSON(t, catalog.SchemaVersion+1), "2026-08-20\n")
+				writeDownloaded(t, dir, downloadedJSON(t, catalog.SchemaVersion+1), "2026-08-20\n")
 			},
 		},
 		{
 			name: "the date is not a date",
 			place: func(t *testing.T, dir string) {
-				writePair(t, dir, valid, "yesterday\n")
+				writeDownloaded(t, dir, valid, "yesterday\n")
 			},
 		},
 		{
-			// What an update interrupted between its two renames leaves.
+			// What an update interrupted between its renames leaves.
 			name: "the date is missing",
 			place: func(t *testing.T, dir string) {
-				writePair(t, dir, valid, "2026-08-20\n")
+				writeDownloaded(t, dir, valid, "2026-08-20\n")
 				if err := os.Remove(filepath.Join(dir, catalog.GeneratedAtFile)); err != nil {
 					t.Fatalf("remove: %v", err)
 				}
@@ -142,8 +160,20 @@ func TestLoadRejectsABrokenDownloadedCatalog(t *testing.T) {
 		{
 			name: "the catalog is missing",
 			place: func(t *testing.T, dir string) {
-				writePair(t, dir, valid, "2026-08-20\n")
+				writeDownloaded(t, dir, valid, "2026-08-20\n")
 				if err := os.Remove(filepath.Join(dir, catalog.CatalogFile)); err != nil {
+					t.Fatalf("remove: %v", err)
+				}
+			},
+		},
+		{
+			// The index is derived from the catalog beside it, so one that
+			// is not there is a directory the shell and the CLI would answer
+			// from differently.
+			name: "the index is missing",
+			place: func(t *testing.T, dir string) {
+				writeDownloaded(t, dir, valid, "2026-08-20\n")
+				if err := os.Remove(filepath.Join(dir, catalog.IndexFile)); err != nil {
 					t.Fatalf("remove: %v", err)
 				}
 			},

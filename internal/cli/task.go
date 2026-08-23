@@ -33,6 +33,10 @@ const (
 // exist is decided by it: they cannot be registered before it is known, and
 // the flag package stops at the first argument it does not recognise.
 func bindTaskRun(e *env, fs *flag.FlagSet, args []string) (binding, error) {
+	// Registered before the arguments are read, so that the flags task run
+	// takes whatever model it is given are on the FlagSet even when there is
+	// no model to read the rest from: that is what `completion show` offers.
+	document := fs.String(flagInput, "", "read the input fields from a JSON document, or from standard input for -")
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return binding{}, usagef("task run: expected <model-id> as the first argument after the verb")
 	}
@@ -47,7 +51,6 @@ func bindTaskRun(e *env, fs *flag.FlagSet, args []string) (binding, error) {
 
 	schema := newInputSchema(m.Input)
 	fields := bindFields(fs, schema)
-	document := fs.String(flagInput, "", "read the input fields from a JSON document, or from standard input for -")
 	return binding{
 		run: func(e *env, positional []string) error {
 			return runTaskRun(e, m, schema, fields, *document, positional)

@@ -49,6 +49,9 @@ kie config set <key> <value>
 kie config show
 kie file upload <path|url>
 kie credits show
+
+kie completion show <bash|zsh>
+kie completion list <model|category|vendor>
 ```
 
 `model list` prints one line per model — ID, category, vendor and name — and
@@ -93,8 +96,29 @@ stored file by its path and name together and has no endpoint that deletes one,
 so a second `photo.png` would otherwise take the place of the first. Uploads
 expire on their own after a few days.
 
-`--json` changes the output of a successful command. Errors are always plain
-text on stderr, distinguished by the exit code.
+`completion show` prints the completion script for a shell, which completes
+the commands, their flags, and the model IDs, categories and vendors of the
+catalog in effect. A model ID averages 25 characters of `vendor/model` and has
+neither an abbreviation nor an alias, so completion is how one is typed.
+
+```sh
+source <(kie completion show bash)   # in ~/.bashrc
+source <(kie completion show zsh)    # in ~/.zshrc, after compinit
+```
+
+The script holds the commands and their flags, and asks the binary for the
+values that come from the catalog, so `catalog update` changes what is
+completed without the script being written again. `completion list` is what it
+asks with; it prints one value per line and reads a small index beside the
+catalog rather than the catalog itself, so a keystroke does not wait for
+700KB of schemas to be decoded. The flags `task run` takes for the input
+fields of a model are not completed: they are the one part of the command line
+that only the catalog knows.
+
+`--json` changes the output of a successful command, and the two `completion`
+commands do not take it: neither a shell script nor a list of words for one is
+a document. Errors are always plain text on stderr, distinguished by the exit
+code.
 
 ## Not covered
 
@@ -108,7 +132,9 @@ use any OpenAI-compatible client for those.
 Everything lives under `$XDG_DATA_HOME/kie-ai-cli`, or under
 `~/.local/share/kie-ai-cli` when that variable is unset or not an absolute
 path: the SQLite ledger in `ledger.db`, the downloaded catalog in `catalog/`,
-and the configuration in `config/config.json`.
+and the configuration in `config/config.json`. A downloaded catalog is three
+files: the two that are published, and `index.tsv`, which is derived from them
+when they are downloaded and is what completion reads.
 
 The API key is read from the `KIE_AI_API_KEY` environment variable first and
 from the configuration file otherwise, so a key can be given for a single
