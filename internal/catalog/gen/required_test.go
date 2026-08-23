@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/douhashi/kie-ai-cli/internal/catalog"
 )
 
 // describedSchema is a request schema holding one property of each kind the
@@ -110,5 +112,95 @@ func TestUnconditionallyRequiredIgnoresConditionalStatements(t *testing.T) {
 		if got := UnconditionallyRequired(description); got != want {
 			t.Errorf("UnconditionallyRequired(%q) = %v, want %v", description, got, want)
 		}
+	}
+}
+
+// silentSchema is a Market input schema of the shape the second correction
+// looks for: properties, and not one word about which of them a request needs.
+func silentSchema() map[string]any {
+	return map[string]any{
+		"properties": map[string]any{
+			"prompt":       map[string]any{"description": "The text prompt used to generate the video. Required field."},
+			"aspect_ratio": map[string]any{"description": "Video aspect ratio configuration. Required field."},
+		},
+	}
+}
+
+// pinInputRequired hands one test a measurement table of its own. Every model
+// in the real one was measured to take a request that carries nothing, so a
+// list that has to be applied is only reachable this way.
+func pinInputRequired(t *testing.T, table map[string][]string) {
+	t.Helper()
+	original := measuredInputRequired
+	measuredInputRequired = table
+	t.Cleanup(func() { measuredInputRequired = original })
+}
+
+func TestCorrectRequiredAppliesWhatASilentSchemaWasMeasuredToNeed(t *testing.T) {
+	pinInputRequired(t, map[string][]string{"vendor/model": {"prompt", "aspect_ratio"}})
+	schema := silentSchema()
+	if err := correctRequired("vendor/model", schema); err != nil {
+		t.Fatalf("correctRequired: %v", err)
+	}
+	if got, want := schema["required"], []any{"aspect_ratio", "prompt"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("required = %v, want %v", got, want)
+	}
+}
+
+// The measured answer for every model in the table so far: the endpoint takes
+// a request that carries nothing. An empty required list would say the same as
+// no required list while moving a line of the catalog, so none is written.
+func TestCorrectRequiredWritesNoRequiredWhereNothingIsNeeded(t *testing.T) {
+	pinInputRequired(t, map[string][]string{"vendor/model": {}})
+	schema := silentSchema()
+	if err := correctRequired("vendor/model", schema); err != nil {
+		t.Fatalf("correctRequired: %v", err)
+	}
+	if _, ok := schema["required"]; ok {
+		t.Errorf("required = %v, want the key to be absent", schema["required"])
+	}
+}
+
+// A silent schema nobody has measured is the ordinary shape of a Market model,
+// not a contradiction, so the crawl carries on and the model is reported
+// instead of guessed at (#35).
+func TestCorrectRequiredCarriesOnPastAnUnmeasuredSilentSchema(t *testing.T) {
+	pinInputRequired(t, map[string][]string{})
+	schema := silentSchema()
+	if err := correctRequired("vendor/model", schema); err != nil {
+		t.Fatalf("correctRequired: %v", err)
+	}
+	if _, ok := schema["required"]; ok {
+		t.Errorf("required = %v, want the key to be absent", schema["required"])
+	}
+	models := []catalog.Model{{ID: "vendor/model", Input: schema}}
+	if got, want := UnmeasuredInputRequired(models), []string{"vendor/model"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("UnmeasuredInputRequired = %v, want %v", got, want)
+	}
+}
+
+// Five of the eleven schemas that say nothing at the root state their
+// requirements in the alternatives they offer instead. Those are not silent,
+// and a measurement must not overwrite what they already declare.
+func TestCorrectRequiredLeavesASchemaThatRequiresThroughItsBranches(t *testing.T) {
+	pinInputRequired(t, map[string][]string{"vendor/model": {"prompt"}})
+	schema := map[string]any{
+		"properties": map[string]any{"image_url": map[string]any{}, "prompt": map[string]any{}},
+		"oneOf": []any{
+			map[string]any{"title": "Text to video", "required": []any{"prompt"}},
+			map[string]any{"title": "Image to video", "required": []any{"image_url"}},
+		},
+	}
+	if RequiresNothing(schema) {
+		t.Fatal("a schema whose branches require something is not silent")
+	}
+	if err := correctRequired("vendor/model", schema); err != nil {
+		t.Fatalf("correctRequired: %v", err)
+	}
+	if _, ok := schema["required"]; ok {
+		t.Errorf("root required = %v, want the branches left to do the requiring", schema["required"])
+	}
+	if got := UnmeasuredInputRequired([]catalog.Model{{ID: "other/model", Input: schema}}); got != nil {
+		t.Errorf("UnmeasuredInputRequired = %v, want nothing to report", got)
 	}
 }
