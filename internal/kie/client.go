@@ -38,14 +38,15 @@ const defaultUploadBaseURL = "https://kieai.redpandaai.co"
 
 // How long one call is given before it is abandoned. Without a limit a stalled
 // connection would hang the command for as long as the operating system allows,
-// and a single limit for everything cannot fit both kinds of call: a read is a
-// short answer, while an upload carries the file, and 100MB -- the largest
-// kie.ai accepts -- does not cross a domestic uplink in thirty seconds.
+// and a single limit for everything cannot fit both kinds of call: reading a
+// balance and submitting a task are short exchanges, while an upload carries
+// the file, and 100MB -- the largest kie.ai accepts -- does not cross a
+// domestic uplink in thirty seconds.
 //
 // These are variables so that the tests can shrink them. Nothing else assigns
 // to them.
 var (
-	getTimeout    = 30 * time.Second
+	callTimeout   = 30 * time.Second
 	uploadTimeout = 10 * time.Minute
 )
 
@@ -111,7 +112,7 @@ func (e *APIError) Error() string {
 // field of a successful answer. It bounds itself, so a caller that has no
 // deadline of its own still gets one.
 func (c *Client) get(ctx context.Context, path string) (json.RawMessage, error) {
-	ctx, cancel := context.WithTimeout(ctx, getTimeout)
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
@@ -121,9 +122,18 @@ func (c *Client) get(ctx context.Context, path string) (json.RawMessage, error) 
 	return c.do(req, "GET "+path)
 }
 
-// postJSON sends one JSON document to url. Unlike get it sets no deadline of
-// its own: how long a POST is allowed to take depends on what is being sent, so
-// that choice is left to the caller.
+// post makes an authenticated POST of a JSON body against the API host, under
+// the same deadline get takes: both are short exchanges with api.kie.ai, and
+// only the uploads, which go to the other host, need longer.
+func (c *Client) post(ctx context.Context, path string, body any) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	return c.postJSON(ctx, c.BaseURL+path, body)
+}
+
+// postJSON sends one JSON document to url. Unlike get and post it sets no
+// deadline of its own: how long an upload is allowed to take depends on what is
+// being sent, so that choice is left to the caller.
 func (c *Client) postJSON(ctx context.Context, url string, body any) (json.RawMessage, error) {
 	encoded, err := json.Marshal(body)
 	if err != nil {

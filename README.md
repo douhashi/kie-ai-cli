@@ -64,9 +64,23 @@ the catalog it was built with. A downloaded catalog this binary cannot read is
 reported rather than skipped over, so the origin `catalog show` names is always
 the one actually in use.
 
-`task run` takes the model ID as a positional argument and its inputs as flags
-derived from the catalog. `--input` accepts the same inputs as a JSON document,
-read from a file or from standard input; flags override what the JSON sets.
+`task run` takes the model ID as the first argument after the verb and its
+inputs as flags named after the model's own input fields. `--input` accepts the
+same inputs as a JSON document, read from a file or from standard input; flags
+override what the JSON sets. An array field is given one element per
+occurrence, and a boolean is written `--field` or `--field=false`.
+
+A field the catalog does not list is refused before anything is sent, because a
+submission cannot be cancelled and a mistyped field name would be paid for. If
+the model really does take it, `model show <model-id>` says what this catalog
+knows and `catalog update` fetches a newer one. A handful of fields are
+declared with a name no shell can pass — a trailing space — and are reachable
+through `--input` alone.
+
+Nothing is submitted until the whole input has been checked and the ledger has
+been opened, so a required field that is missing, or a ledger that cannot be
+written to, costs nothing. Once a task exists its ID is printed even if
+recording it afterwards fails: it is the only handle on what was bought.
 
 Nothing waits for a result. `task refresh` polls the tasks that are still
 running and updates the ledger; `task list` only reads the ledger.

@@ -25,6 +25,11 @@ func runCreditsShow(e *env, args []string) error {
 	return writeCredits(e.stdout, balance, e.json)
 }
 
+// newClient builds the client a command talks to kie.ai with. It is a variable
+// so that a test can point every command at a server of its own; nothing in a
+// shipped build assigns to it, which is why there is no flag for it.
+var newClient = kie.New
+
 // client resolves the API key and builds a client for kie.ai. A key that is
 // nowhere to be found is reported here, once, in terms of the two places it
 // can be put -- the caller would otherwise learn about it from an
@@ -38,7 +43,7 @@ func (e *env) client() (*kie.Client, error) {
 		return nil, fmt.Errorf("no API key is configured: set %s, or run `%s config set %s <value>`",
 			config.APIKeyEnv, name, keyAPIKey)
 	}
-	return kie.New(key.Value), nil
+	return newClient(key.Value), nil
 }
 
 // creditsResult is the JSON contract of credits show. The balance is a
