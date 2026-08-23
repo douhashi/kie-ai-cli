@@ -1,0 +1,112 @@
+name: Catalog refresh
+
+# docs.kie.ai を定期的に巡回し、コミット済みカタログとの差分を PR にする。
+# 生成の中身は mise タスク（mise.toml）を SSoT として呼び出し、ここで二重定義しない。
+on:
+  schedule:
+    # 03:27 JST（UTC 18:27）の日次。毎時 0 分を避けて Actions の混雑帯から外す。
+    - cron: "27 18 * * *"
+  workflow_dispatch:
+
+# 231 ページの巡回を重ねない。走行中の run を殺すと途中まで取った巡回が無駄になるので、
+# 打ち切りではなく待たせる。
+concurrency:
+  group: catalog-refresh
+  cancel-in-progress: false
+
+# contents: 生成結果を push する / pull-requests: PR を出す / issues: 失敗を起票する。
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  # 追従用の固定ブランチ。日ごとにブランチを増やすと PR が積み上がる。
+  HEAD_BRANCH: catalog-refresh
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ツールのバージョンは mise.toml [tools] を SSoT とする（CI 側で pin しない）。
+      - name: Setup mise
+        uses: jdx/mise-action@v4
+
+      # 想定外のページに当たると生成器が落ちる。落ちたことは後段の通知が拾う。
+      - name: Regenerate catalog
+        run: mise run catalog
+
+      - name: Detect changes
+        id: diff
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- internal/catalog/catalog.json; then
+            echo "カタログに差分なし"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --stat -- internal/catalog/catalog.json
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # GITHUB_TOKEN が作った PR には CI が走らない。差分があった日の検査は
+      # ここで通し、結果は PR 本文に残す（レビューが検査結果無しで届かないようにする）。
+      - name: Lint
+        if: steps.diff.outputs.changed == 'true'
+        run: mise run lint
+
+      - name: Test
+        if: steps.diff.outputs.changed == 'true'
+        run: mise run test
+
+      - name: Open pull request
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$HEAD_BRANCH"
+          git commit -m "chore(catalog): docs.kie.ai の内容に追従する" -- internal/catalog/catalog.json
+          # 前回の追従が取り込まれないまま次の巡回が来ても PR を積まない。
+          git push --force origin "$HEAD_BRANCH"
+
+          if [ -n "$(gh pr list --head "$HEAD_BRANCH" --base "$BASE" --state open --json number --jq '.[].number')" ]; then
+            echo "既存の PR のブランチを更新した"
+            exit 0
+          fi
+
+          gh pr create --base "$BASE" --head "$HEAD_BRANCH" \
+            --title "chore(catalog): docs.kie.ai の内容に追従する" \
+            --body "$(cat <<EOF
+          \`mise run catalog\` の再生成で \`internal/catalog/catalog.json\` に差分が出た。
+
+          \`GITHUB_TOKEN\` が作った PR には CI が走らないため、検査は生成と同じジョブで通してある。
+
+          - \`mise run lint\`: 成功
+          - \`mise run test\`: 成功
+          - run: $RUN_URL
+          EOF
+          )"
+
+      # 定期実行の失敗は誰も見ていないところで起きる。黙って終わらせない。
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --label catalog-refresh --state open --limit 1 --json number --jq '.[].number')"
+          body="カタログの定期更新が失敗した: $RUN_URL"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --label catalog-refresh \
+              --title "chore(catalog): カタログの定期更新が失敗している" --body "$body"
+          fi
