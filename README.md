@@ -19,15 +19,52 @@ keeps a local ledger of everything it sent.
 
 - **Submit and walk away.** Creating a task records it in a local ledger and
   exits immediately. Status checks and downloads are separate commands.
-- **One kind of operation.** Market models and the older per-service APIs
-  (Suno, Veo3, 4o Image, Flux Kontext, Runway, File Upload) are exposed the same
-  way. An operation is one create/query pair, addressed by an operation ID.
-- **A catalog generated from the docs.** Operations, their endpoints and their
-  input schemas are derived from the OpenAPI specifications embedded in the
-  kie.ai documentation, so new models can be picked up without hand-written
-  definitions.
+- **One kind of model.** Market models and the older per-service APIs
+  (Suno, Veo3, 4o Image, Flux Kontext, Runway) are exposed the same way. A model
+  is one create/query pair, addressed by a model ID.
+- **A catalog generated from the docs.** Models, their endpoints and their input
+  schemas are derived from the OpenAPI specifications embedded in the kie.ai
+  documentation, so new models can be picked up without hand-written definitions.
 - **A single binary.** Written in Go, with the catalog baked in. Updating the
   catalog is an explicit command; nothing is fetched behind your back.
+
+## Commands
+
+Every command is a noun followed by a verb.
+
+```sh
+kie model list [--category image] [--vendor seedream]
+kie model show <model-id>
+
+kie task run <model-id> [--<field> <value>...] [--input <file|->]
+kie task list [--status <status>] [--unsaved]
+kie task refresh
+kie task download <task-id> | --unsaved
+
+kie catalog update
+kie catalog show
+kie config set <key> <value>
+kie config show
+kie file upload <path|url>
+kie credits show
+```
+
+`task run` takes the model ID as a positional argument and its inputs as flags
+derived from the catalog. `--input` accepts the same inputs as a JSON document,
+read from a file or from standard input; flags override what the JSON sets.
+
+Nothing waits for a result. `task refresh` polls the tasks that are still
+running and updates the ledger; `task list` only reads the ledger.
+
+`--json` changes the output of a successful command. Errors are always plain
+text on stderr, distinguished by the exit code.
+
+## Not covered
+
+The chat models on kie.ai (Gemini, Claude, GPT, Grok, Codex) speak the
+OpenAI-compatible `/v1/chat/completions` endpoint. They are synchronous, return
+no `taskId`, and never reach the ledger, so they are left out of the catalog —
+use any OpenAI-compatible client for those.
 
 ## State on disk
 
