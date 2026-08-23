@@ -50,11 +50,13 @@ func TestTaskRunSubmitsToTheRealAPI(t *testing.T) {
 			// This tool never invents a callBackUrl, and this
 			// endpoint insists on one: asked without it, kie.ai
 			// answers HTTP 200 with code 422 and creates nothing.
-			// The catalog does not list it as required -- the
-			// OpenAPI document it is generated from does not --
-			// which only the real API says, and is why this test
-			// exists. The address is one nothing is listening on:
-			// the task is polled for, not called back.
+			// The catalog lists it as required, corrected
+			// from the description because the OpenAPI
+			// document's own required list leaves it out
+			// (#33); this test is what says the real API
+			// agrees. The address is one nothing is
+			// listening on: the task is polled for, not
+			// called back.
 			extra: []string{"--callBackUrl", "https://example.com/kie-ai-cli-e2e"},
 		},
 	}

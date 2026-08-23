@@ -100,6 +100,12 @@ func buildModel(entry llms.Entry, operation *openapi.Operation, operations map[s
 	if err != nil {
 		return catalog.Model{}, err
 	}
+	// The schema is corrected once the model is named, because what a page
+	// says about a property is only worth as much as the request that was
+	// made against that model's endpoint; see required.go.
+	if err := correctRequired(id, input); err != nil {
+		return catalog.Model{}, err
+	}
 	query, err := queryEndpoint(queryPath, operations)
 	if err != nil {
 		return catalog.Model{}, err

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/douhashi/kie-ai-cli/internal/catalog"
+	"github.com/douhashi/kie-ai-cli/internal/catalog/gen"
 )
 
 // committed returns the generated catalog as the binary ships it: the copy
@@ -235,6 +236,141 @@ func TestStaleWarningNamesTheOrigin(t *testing.T) {
 		}
 		if strings.Contains(got, string(other)) {
 			t.Errorf("StaleWarning for a %s catalog calls it %s: %q", origin, other, got)
+		}
+	}
+}
+
+// walkObjects calls visit on every object schema reachable from schema,
+// together with the names it lists as required. The catalog is checked by
+// walking the committed JSON itself rather than by asking the generator, so a
+// rule that stopped being applied shows up here.
+func walkObjects(schema map[string]any, visit func(properties map[string]any, required map[string]bool)) {
+	required := map[string]bool{}
+	if raw, ok := schema["required"].([]any); ok {
+		for _, name := range raw {
+			if name, ok := name.(string); ok {
+				required[name] = true
+			}
+		}
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	if properties != nil {
+		visit(properties, required)
+	}
+	for _, property := range properties {
+		if property, ok := property.(map[string]any); ok {
+			walkObjects(property, visit)
+		}
+	}
+	for _, keyword := range []string{"oneOf", "anyOf", "allOf"} {
+		members, _ := schema[keyword].([]any)
+		for _, member := range members {
+			if member, ok := member.(map[string]any); ok {
+				walkObjects(member, visit)
+			}
+		}
+	}
+	if items, ok := schema["items"].(map[string]any); ok {
+		walkObjects(items, visit)
+	}
+}
+
+// AC3: kie.ai says in prose that some properties are needed on every request
+// while leaving them out of the required list. Each such disagreement is
+// settled by a request made against the real API and pinned in
+// internal/catalog/gen/required.go, so the committed catalog must hold, for
+// every model, either the corrected required list or the measurement saying
+// the endpoint takes the request without it.
+func TestCommittedCatalogAgreesWithTheMeasuredRequirements(t *testing.T) {
+	// The four disagreements known when this was written, and the verdict
+	// measured for each. Listing them also keeps the test from passing
+	// because the walk stopped reaching anything.
+	seen := map[string]bool{}
+	want := map[string]bool{
+		"suno-api/generate-lyrics.callBackUrl":     true,
+		"suno-api/cover-suno.callBackUrl":          true,
+		"runway-api/extend-ai-video.callBackUrl":   false,
+		"runway-api/generate-ai-video.callBackUrl": false,
+	}
+	for _, model := range committed(t).Models {
+		walkObjects(model.Input, func(properties map[string]any, required map[string]bool) {
+			for name, property := range properties {
+				property, ok := property.(map[string]any)
+				if !ok {
+					continue
+				}
+				description, _ := property["description"].(string)
+				if !gen.UnconditionallyRequired(description) {
+					continue
+				}
+				measured, pinned := gen.MeasuredRequired(model.ID, name)
+				path := model.ID + "." + name
+				if _, known := want[path]; known {
+					seen[path] = true
+					if pinned && measured != want[path] {
+						t.Errorf("%s: measured as required=%v, want %v", path, measured, want[path])
+					}
+				}
+				// Where a request was made, its answer is the authority
+				// in both directions: the field is required exactly when
+				// kie.ai refused to do without it.
+				if pinned {
+					if required[name] != measured {
+						t.Errorf("%s: kie.ai refuses a request without it: %v, but the catalog requires it: %v",
+							path, measured, required[name])
+					}
+					continue
+				}
+				if !required[name] {
+					t.Errorf("%s: described as required for every request, absent from required, and not measured", path)
+				}
+			}
+		})
+	}
+	for path := range want {
+		if !seen[path] {
+			t.Errorf("%s no longer carries the description the correction reads; the walk is not reaching it", path)
+		}
+	}
+}
+
+// The correction reads the wording, and over-requiring is the same mistake in
+// the other direction: a property that is required only in some mode must stay
+// optional, or `task run` would refuse a request kie.ai accepts.
+func TestCommittedCatalogLeavesConditionallyRequiredPropertiesOptional(t *testing.T) {
+	conditional := map[string][]string{
+		"suno-api/generate-music":                 {"style", "title"},
+		"suno-api/extend-music":                   {"continueAt", "prompt", "style", "title"},
+		"suno-api/upload-and-cover-audio":         {"style", "title"},
+		"flux-kontext-api/generate-or-edit-image": {"inputImage"},
+		"4o-image-api/generate-4-o-image":         {"prompt"},
+	}
+	byID := map[string]catalog.Model{}
+	for _, model := range committed(t).Models {
+		byID[model.ID] = model
+	}
+	for id, names := range conditional {
+		model, ok := byID[id]
+		if !ok {
+			t.Errorf("%s is no longer in the catalog", id)
+			continue
+		}
+		required := map[string]bool{}
+		if raw, ok := model.Input["required"].([]any); ok {
+			for _, name := range raw {
+				if name, ok := name.(string); ok {
+					required[name] = true
+				}
+			}
+		}
+		properties, _ := model.Input["properties"].(map[string]any)
+		for _, name := range names {
+			if _, ok := properties[name]; !ok {
+				t.Errorf("%s: %s is no longer a property, so this case no longer guards anything", id, name)
+			}
+			if required[name] {
+				t.Errorf("%s: %s is required only under a condition and must not be listed as required", id, name)
+			}
 		}
 	}
 }
