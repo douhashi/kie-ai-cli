@@ -1,0 +1,12 @@
+# docs.kie.ai
+
+## Docs
+- [Market](https://docs.kie.ai/market/quickstart.md): 
+
+## API Docs
+- Image    Models > Seedream [Seedream4.0 - Text to Image](https://docs.kie.ai/market/seedream/seedream-v4-text-to-image.md): High-quality photorealistic image generation powered by Seedream4.0's advanced AI model
+- Chat  Models > Claude [Claude Opus 5](https://docs.kie.ai/market/claude/claude-opus-5.md): ### Streaming Support
+- Suno API > Music Generation [Generate Music](https://docs.kie.ai/suno-api/generate-music.md): Generate music with or without lyrics using AI models.
+- Suno API > Music Generation [Get Music Task Details](https://docs.kie.ai/suno-api/get-music-details.md): Retrieve detailed information about a music generation task.
+- [Get Task Details](https://docs.kie.ai/market/common/get-task-detail.md): Query the status and results of any task created in the Market models. This is a unified query interface that works with all models under the Market category.
+- Image    Models > Seedream [Seedream3.0 生成图像](https://docs.kie.ai/cn/market/seedream/seedream-v3.md): 基于 Seedream3.0 实现文本到图像生成

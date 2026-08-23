@@ -44,6 +44,22 @@ CLI 自身は環境変数 `KIE_AI_API_KEY` を優先し、無ければ設定フ�
 infisical run -- go test -tags e2e ./...
 ```
 
+## カタログの再生成
+
+`mise run catalog` が `docs.kie.ai/llms.txt` を起点に英語版の API ページを巡回し、
+`internal/catalog/catalog.json` を書き直す。API キーは要らない。
+
+想定外のページ（OpenAPI が無い・パスが複数・モデル ID が一意でない）に当たったら
+**カタログを書かずに落ちる**。取りこぼしを黙って落とすと、必要になるまで誰も
+気づかないからである。落ちたら理由に挙がった URL を読み、
+`internal/catalog/gen/pairs` の表を直す。
+
+231 ページを取りに行くので、開発中に何度も回すときはページを再利用する。
+
+```sh
+mise run catalog -- --pages-dir .tmp/catalog-pages
+```
+
 ## タスク
 
 `mise tasks` で一覧できる。
@@ -53,6 +69,7 @@ infisical run -- go test -tags e2e ./...
 | `mise run setup` | git hooks の導入 |
 | `mise run lint` | ドキュメントの書式契約と Go の静的検査 |
 | `mise run test` | Go のテスト（cgo 無し・`e2e` タグを除く） |
+| `mise run catalog` | docs.kie.ai を巡回してカタログを再生成する |
 | `mise run build` | 手元向けの単一バイナリを `dist/` に作る |
 | `mise run build-all` | 配布対象の 3 OS 向けにクロスビルドし、成果物を検査する |
 
@@ -66,6 +83,9 @@ infisical run -- go test -tags e2e ./...
 | `roadmap.md` | 1 行の上限／**入れ子の禁止**／完了項目に依存を残さない／ID 重複なし／見出しの制限 |
 | Go のコード | `gofmt` 未適用のファイルが無いこと／`go vet ./...` |
 
+`mise run test` は `internal/catalog/catalog.json` そのものも検査する。生成器が
+通ることと、**コミット済みのカタログが揃っていること**は別の話だからである。
+
 pre-commit フックが走らせるのは `scripts/check-docs-format.py` だけである。
 Go の検査はツールチェーンを要してフックには重いので、`mise run lint` と CI に置く。
 
@@ -76,7 +96,7 @@ Go の検査はツールチェーンを要してフックには重いので、`m
 
 ## CI
 
-CI は PR で 2 つのジョブを回す。どちらも `mise install` の後に mise タスクを呼ぶだけで、
+CI は PR で 3 つのジョブを回す。どちらも `mise install` の後に mise タスクを呼ぶだけで、
 検査の中身は `mise.toml` を SSoT とする（CI 側で二重定義しない）。
 
 | ジョブ | 内容 |

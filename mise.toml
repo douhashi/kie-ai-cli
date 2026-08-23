@@ -38,6 +38,12 @@ description = "Go のテストを走らせる"
 # 実行は `infisical run -- go test -tags e2e ./...`（docs/development/setup.md）。
 run = ["CGO_ENABLED=0 go test ./..."]
 
+[tasks.catalog]
+description = "docs.kie.ai を巡回して internal/catalog/catalog.json を再生成する"
+# 231 ページを取りに行くので同時実行数を絞る。開発中に何度も回すときは
+# `mise run catalog -- --pages-dir .tmp/catalog-pages` でページを再利用する。
+run = ["go run ./cmd/catalog-gen"]
+
 [tasks.build]
 description = "手元の OS/アーキテクチャ向けに単一バイナリをビルドする"
 # cgo を切って外部 C ライブラリへの動的リンクを排し、-trimpath で
