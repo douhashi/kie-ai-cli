@@ -53,8 +53,8 @@ func noFlags(run handler) func(*flag.FlagSet) handler {
 
 // env is what a handler is given: where to write its result and its warnings,
 // where the state lives, whether the caller asked for JSON, and what time it
-// is -- which is a value rather than a call so that the age of the built-in
-// catalog can be tested without waiting for it.
+// is -- which is a value rather than a call so that the age of the catalog in
+// effect can be tested without waiting for it.
 type env struct {
 	stdout io.Writer
 	stderr io.Writer
@@ -64,6 +64,16 @@ type env struct {
 }
 
 var commands = []command{
+	{
+		noun: "catalog", verb: "update",
+		summary: "Download the published model catalog and read it from now on.",
+		bind:    noFlags(runCatalogUpdate),
+	},
+	{
+		noun: "catalog", verb: "show",
+		summary: "Show which model catalog is in effect and when it was generated.",
+		bind:    noFlags(runCatalogShow),
+	},
 	{
 		noun: "config", verb: "set", args: "<key> <value>",
 		summary: "Set a configuration value.",
@@ -81,7 +91,7 @@ var commands = []command{
 	},
 	{
 		noun: "model", verb: "list", args: "[--category <name>] [--vendor <name>]",
-		summary: "List the models built into this binary.",
+		summary: "List the models in the catalog in effect.",
 		bind:    bindModelList,
 	},
 	{

@@ -65,8 +65,9 @@ mise run catalog -- --pages-dir .tmp/catalog-pages
 （実行日を UTC の `YYYY-MM-DD` で 1 行）を書き換える。定期実行が中身の変わらない
 PR を出さないためで、**この日付を手で書き換えない**。
 
-この 2 ファイルはバイナリへ焼き込まれる。生成日から 90 日
-（`catalog.MaxAge`）を過ぎたカタログを積んだバイナリは、その旨を警告する。
+この 2 ファイルはバイナリへ焼き込まれ、同じ 2 ファイルが Release 資産として
+公開される（`catalog update` の取得先）。生成日から 90 日（`catalog.MaxAge`）を
+過ぎたカタログは、焼き込み・手元のどちらであってもその旨を警告する。
 
 ## タスク
 
@@ -120,7 +121,7 @@ PR の検査とは別に、カタログの追従を 2 つのワークフロー�
 | ワークフロー | 内容 |
 |---|---|
 | `catalog-refresh` | 日次（03:27 JST）と手動で `mise run catalog` を回し、差分があれば `catalog-refresh` ブランチへ force push して PR を出す |
-| `catalog-publish` | main の `catalog.json` 更新を tag `catalog` の Release 資産へ上げる |
+| `catalog-publish` | main の `catalog.json` / `generated_at.txt` 更新を tag `catalog` の Release 資産 2 件へ上げる |
 
 差分が無い日は PR を作らない。差分があった日は同じジョブで `mise run lint` と
 `mise run test` まで通してから PR を出す。`GITHUB_TOKEN` が作った PR には CI が

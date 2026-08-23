@@ -319,7 +319,7 @@ func TestWriteModelShowJSON(t *testing.T) {
 // V5: an old catalog is reported, once, on stderr -- so that a caller reading
 // the JSON gets a document and not a document with a warning glued to it.
 func TestStaleCatalogIsReportedOnStderr(t *testing.T) {
-	c, err := catalog.Load()
+	c, err := catalog.Load(t.TempDir())
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}

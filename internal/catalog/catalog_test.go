@@ -13,11 +13,12 @@ import (
 )
 
 // committed returns the generated catalog as the binary ships it: the copy
-// embedded from catalog.json at build time. Checking it is a separate matter
-// from checking the generator that produced it.
+// embedded from catalog.json at build time, which an empty directory is what
+// it takes to reach. Checking it is a separate matter from checking the
+// generator that produced it.
 func committed(t *testing.T) catalog.Catalog {
 	t.Helper()
-	read, err := catalog.Load()
+	read, err := catalog.Load(t.TempDir())
 	if err != nil {
 		t.Fatalf("load the embedded catalog: %v", err)
 	}
@@ -172,7 +173,7 @@ func TestEmbeddedCatalogCarriesItsGenerationDate(t *testing.T) {
 // a fresh catalog stays quiet.
 func TestStaleWarningFiresOnlyPastMaxAge(t *testing.T) {
 	generated := time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC)
-	subject := catalog.Catalog{GeneratedAt: generated}
+	subject := catalog.Catalog{GeneratedAt: generated, Origin: catalog.OriginBuiltIn}
 
 	for _, tc := range []struct {
 		days int
@@ -213,6 +214,27 @@ func TestCommittedCatalogHoldsNoGenerationDate(t *testing.T) {
 	for _, unwanted := range []string{"generatedAt", committed(t).GeneratedAt.Format(time.DateOnly)} {
 		if bytes.Contains(raw, []byte(unwanted)) {
 			t.Errorf("catalog.json holds %q, which would make every regeneration a diff", unwanted)
+		}
+	}
+}
+
+// The warning names where the catalog in effect came from: the two are fixed by
+// entirely different acts -- rebuilding the binary, or downloading again --
+// and a reader who cannot tell which one they hold cannot pick.
+func TestStaleWarningNamesTheOrigin(t *testing.T) {
+	generated := time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC)
+	now := generated.Add(catalog.MaxAge)
+
+	for origin, other := range map[catalog.Origin]catalog.Origin{
+		catalog.OriginBuiltIn:    catalog.OriginDownloaded,
+		catalog.OriginDownloaded: catalog.OriginBuiltIn,
+	} {
+		got := catalog.Catalog{GeneratedAt: generated, Origin: origin}.StaleWarning(now)
+		if !strings.Contains(got, string(origin)) {
+			t.Errorf("StaleWarning for a %s catalog = %q, want it to say so", origin, got)
+		}
+		if strings.Contains(got, string(other)) {
+			t.Errorf("StaleWarning for a %s catalog calls it %s: %q", origin, other, got)
 		}
 	}
 }

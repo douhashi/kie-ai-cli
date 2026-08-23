@@ -51,12 +51,13 @@ func runModelShow(e *env, args []string) error {
 	return writeModelShow(e.stdout, c.Models[i], e.json)
 }
 
-// loadCatalog reads the catalog built into this binary and reports its age on
-// stderr once it is old enough to be misleading. The warning is not an error:
-// an old catalog still answers, and the caller decides whether that is good
-// enough. Keeping it off stdout leaves --json a document a machine can read.
+// loadCatalog reads the catalog in effect -- the downloaded one if there is
+// one -- and reports its age on stderr once it is old enough to be misleading.
+// The warning is not an error: an old catalog still answers, and the caller
+// decides whether that is good enough. Keeping it off stdout leaves --json a
+// document a machine can read.
 func loadCatalog(e *env) (catalog.Catalog, error) {
-	c, err := catalog.Load()
+	c, err := catalog.Load(e.paths.Catalog)
 	if err != nil {
 		return catalog.Catalog{}, err
 	}

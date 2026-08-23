@@ -13,7 +13,7 @@ import (
 // number copied into a test would turn every new model into a failure.
 func embedded(t *testing.T) catalog.Catalog {
 	t.Helper()
-	c, err := catalog.Load()
+	c, err := catalog.Load(t.TempDir())
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
