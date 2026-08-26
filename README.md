@@ -78,6 +78,7 @@ kie credits show
 
 kie completion show <bash|zsh>
 kie completion list <model|category|vendor>
+kie skill install [--scope project|user] [--force]
 ```
 
 `model list` prints one line per model — ID, category, vendor and name — and
@@ -172,6 +173,21 @@ catalog rather than the catalog itself, so a keystroke does not wait for
 700KB of schemas to be decoded. The flags `task run` takes for the input
 fields of a model are not completed: they are the one part of the command line
 that only the catalog knows.
+
+`skill install` writes the [Claude Code](https://claude.com/claude-code) skill
+this binary carries into a skills directory, so an agent knows how the tool is
+used without being told again in every session. It goes into
+`.claude/skills/kie-ai-cli/SKILL.md` under the current directory, or under the
+user's own `.claude` — `~/.claude`, or `CLAUDE_CONFIG_DIR` when that names an
+absolute path — with `--scope user`. The path it wrote is printed.
+
+The skill holds no part of the catalog. Model IDs and input fields change with
+`catalog update`, so it tells the agent to ask `model show` for them instead,
+and the command reference in it is rendered from the same table as the usage
+text above. Installing again with the same binary reports `unchanged` and
+rewrites nothing; a newer binary replaces the skill it wrote before. A file
+this tool did not write is never overwritten without `--force`, so a skill of
+your own under that name is safe where it stands.
 
 `--json` changes the output of a successful command, and the two `completion`
 commands do not take it: neither a shell script nor a list of words for one is
