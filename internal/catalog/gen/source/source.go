@@ -27,8 +27,14 @@ const (
 	// hold the crawl near four requests a second, which it serves happily.
 	defaultConcurrency = 2
 	defaultInterval    = 250 * time.Millisecond
-	defaultAttempts    = 4
-	defaultBackoff     = time.Second
+	// A throttled site does not recover in the seven seconds four tries a
+	// second apart give it: a real crawl spent them all and the run died
+	// with 230 of its 231 pages in hand. Six waits, doubling and capped,
+	// hand it a minute of quiet instead -- and cost nothing on a run where
+	// nothing goes wrong, because a page that answers is not retried.
+	defaultAttempts = 7
+	defaultBackoff  = time.Second
+	maxBackoff      = 30 * time.Second
 	// maxPageBytes caps what a page may weigh. The largest real page is a few
 	// hundred kilobytes; anything far past that is not the page we asked for.
 	maxPageBytes = 8 << 20
@@ -51,7 +57,8 @@ type Client struct {
 	// Attempts is the number of tries per page, retrying only failures that
 	// may pass on their own.
 	Attempts int
-	// Backoff is the pause before a retry, doubling each time.
+	// Backoff is the pause before a retry, doubling each time and capped.
+	// It holds back the whole crawl rather than the one page that failed.
 	Backoff time.Duration
 
 	// scheduleMu guards nextRequest, the time the next request may start.
@@ -60,27 +67,55 @@ type Client struct {
 }
 
 // schedule blocks until this client's turn to make a request comes round.
+//
+// A slot is taken at the moment it falls due rather than reserved in advance,
+// and the wait is re-checked when it expires. That is what lets pause hold back
+// requests that are already waiting their turn: a slot handed out ahead of time
+// would be spent knocking on a site that has just asked to be left alone.
 func (c *Client) schedule(ctx context.Context) error {
 	interval := c.Interval
 	if interval <= 0 {
 		interval = defaultInterval
 	}
 
-	c.scheduleMu.Lock()
-	at := c.nextRequest
-	if now := time.Now(); at.Before(now) {
-		at = now
-	}
-	c.nextRequest = at.Add(interval)
-	c.scheduleMu.Unlock()
+	for {
+		c.scheduleMu.Lock()
+		now := time.Now()
+		at := c.nextRequest
+		if !at.After(now) {
+			c.nextRequest = now.Add(interval)
+			c.scheduleMu.Unlock()
+			return nil
+		}
+		c.scheduleMu.Unlock()
 
-	timer := time.NewTimer(time.Until(at))
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+		timer := time.NewTimer(time.Until(at))
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		}
+	}
+}
+
+// pause holds the whole crawl back for at least d.
+//
+// The site does not throttle one page at a time: when it answers with its
+// shell, it is answering every request that way, and the pages queued behind
+// the one that noticed are about to be told the same thing. So the wait goes on
+// the crawl's clock rather than into the goroutine that found it -- retrying
+// alone, while the rest of the crawl keeps knocking, spends the tries without
+// the site ever being given a quiet moment.
+//
+// It is a deadline rather than an addition, so several pages noticing at once
+// ask for one pause between them instead of stacking one each.
+func (c *Client) pause(d time.Duration) {
+	until := time.Now().Add(d)
+	c.scheduleMu.Lock()
+	defer c.scheduleMu.Unlock()
+	if c.nextRequest.Before(until) {
+		c.nextRequest = until
 	}
 }
 
@@ -167,14 +202,8 @@ func (c *Client) download(ctx context.Context, pageURL string) (string, error) {
 	}
 
 	var lastErr error
+	wait := backoff
 	for attempt := range attempts {
-		if attempt > 0 {
-			select {
-			case <-time.After(backoff << (attempt - 1)):
-			case <-ctx.Done():
-				return "", ctx.Err()
-			}
-		}
 		body, retryable, err := c.attempt(ctx, pageURL)
 		if err == nil {
 			return body, nil
@@ -182,6 +211,10 @@ func (c *Client) download(ctx context.Context, pageURL string) (string, error) {
 		lastErr = err
 		if !retryable {
 			return "", err
+		}
+		if attempt < attempts-1 {
+			c.pause(wait)
+			wait = min(wait*2, maxBackoff)
 		}
 	}
 	return "", fmt.Errorf("gave up after %d attempts: %w", attempts, lastErr)

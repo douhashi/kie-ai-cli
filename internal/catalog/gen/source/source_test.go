@@ -248,3 +248,84 @@ func TestFetchSpacesItsRequests(t *testing.T) {
 		t.Errorf("5 requests spread over %v, want at least %v", spread, want)
 	}
 }
+
+// A run that failed in CI spent all four of its tries on one page in seven
+// seconds while the rest of the crawl kept knocking, and died with 230 of 231
+// pages in hand. The tries are only worth having if the site is quiet between
+// them, so the wait goes on the crawl's clock: once one page is told it is not
+// welcome, no page asks again until the wait is over.
+func TestFetchHoldsBackTheWholeCrawlAfterTheShell(t *testing.T) {
+	var mu sync.Mutex
+	var starts []time.Time
+	var requests int
+	server := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		starts = append(starts, time.Now())
+		requests++
+		first := requests == 1
+		mu.Unlock()
+		if first {
+			fmt.Fprint(w, "<!DOCTYPE html><html></html>")
+			return
+		}
+		fmt.Fprint(w, "# a real page")
+	})
+
+	const (
+		interval = 100 * time.Millisecond
+		backoff  = 600 * time.Millisecond
+	)
+	client := &source.Client{Concurrency: 3, Interval: interval, Attempts: 3, Backoff: backoff}
+	var urls []string
+	for i := range 3 {
+		urls = append(urls, fmt.Sprintf("%s/page-%d.md", server.URL, i))
+	}
+	if _, err := client.Fetch(t.Context(), urls); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	slices.SortFunc(starts, func(a, b time.Time) int { return a.Compare(b) })
+	if len(starts) < 2 {
+		t.Fatalf("the server saw %d requests, want the retry and the other pages", len(starts))
+	}
+	// The second request is the first one held back by the pause, whichever
+	// page it belongs to. The slack is one interval: the pause is only set
+	// once the shell has been read, and everything that delays that reading
+	// -- the round trip, the handler's own lock, goroutine scheduling --
+	// shortens the gap measured here. A client that pauses only the goroutine
+	// that found the shell lands at one interval, well below the bound.
+	if gap, want := starts[1].Sub(starts[0]), backoff-interval; gap < want {
+		t.Errorf("the next request came %v after the shell, want at least %v", gap, want)
+	}
+}
+
+// The default budget has to outlast a throttling that does not lift at once:
+// six waits, doubling from a second and capped, rather than the four tries that
+// gave the site seven seconds.
+func TestFetchOutlastsAWindowOfShellAnswers(t *testing.T) {
+	var requests atomic.Int64
+	server := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) <= 5 {
+			fmt.Fprint(w, "<!DOCTYPE html><html></html>")
+			return
+		}
+		fmt.Fprint(w, "# a real page")
+	})
+	// Attempts is left at its default; only the waits are shortened, so what
+	// is checked is the number of tries a real crawl gets.
+	client := &source.Client{Concurrency: 1, Interval: time.Microsecond, Backoff: time.Millisecond}
+
+	url := server.URL + "/throttled.md"
+	pages, err := client.Fetch(t.Context(), []string{url})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if pages[url] != "# a real page" {
+		t.Errorf("body = %q", pages[url])
+	}
+	if got := requests.Load(); got != 6 {
+		t.Errorf("server saw %d requests, want the sixth to be the one that answered", got)
+	}
+}
