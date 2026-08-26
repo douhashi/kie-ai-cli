@@ -142,6 +142,12 @@ func commands() []command {
 			bind:    noFlags(runCreditsShow),
 		},
 		{
+			noun: "skill", verb: "install", args: "[--scope <project|user>] [--force]",
+			summary: "Write the Claude Code skill for this tool into a skills directory.",
+			bind:    bindSkillInstall,
+			flags:   map[string]candidates{"scope": fixed(scopeProject, scopeUser)},
+		},
+		{
 			noun: "model", verb: "list", args: "[--category <name>] [--vendor <name>]",
 			summary: "List the models in the catalog in effect.",
 			bind:    bindModelList,

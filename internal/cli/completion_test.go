@@ -131,8 +131,9 @@ func TestCompletionShowCoversEveryCommand(t *testing.T) {
 				// Every noun and verb, including the one being read.
 				"catalog", "update", "config", "credits", "file", "upload",
 				"model", "list", "show", "task", "run", "completion",
+				"skill", "install",
 				// The flags, which come from the commands themselves.
-				"--json", "--category", "--vendor", "--input",
+				"--json", "--category", "--vendor", "--input", "--scope",
 				// The axes, asked for rather than baked in.
 				"completion list model", "completion list category", "completion list vendor",
 				// Both names the tool is installed under.
