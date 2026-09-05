@@ -24,6 +24,7 @@ flux-kontext-api/generate-or-edit-image	image	flux-kontext
 gemini-omni-video	video	gemini-omni
 google/gemini-2-5-pro-tts	music	gemini
 google/gemini-3-1-flash-tts	music	gemini
+google/gemini-omni-flash-1-1	video	gemini-omni
 google/imagen4	image	google
 google/imagen4-fast	image	google
 google/imagen4-ultra	image	google
