@@ -24,11 +24,16 @@ flux-kontext-api/generate-or-edit-image	image	flux-kontext
 gemini-omni-video	video	gemini-omni
 google/gemini-2-5-pro-tts	music	gemini
 google/gemini-3-1-flash-tts	music	gemini
+google/gemini-omni-flash-1-1	video	gemini-omni
 google/imagen4	image	google
 google/imagen4-fast	image	google
 google/imagen4-ultra	image	google
 google/nano-banana	image	google
 google/nano-banana-edit	image	google
+gpt-image-2-5-flare-image-to-image	image	gpt-image
+gpt-image-2-5-flare-text-to-image	image	gpt-image
+gpt-image-2-5-sunburst-image-to-image	image	gpt-image
+gpt-image-2-5-sunburst-text-to-image	image	gpt-image
 gpt-image-2-image-to-image	image	gpt-image
 gpt-image-2-text-to-image	image	gpt-image
 gpt-image/1.5-image-to-image	image	gpt-image
