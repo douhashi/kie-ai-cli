@@ -46,6 +46,14 @@ var migrations = [][]string{
 		// the user moved somewhere of their own.
 		`ALTER TABLE tasks ADD COLUMN saved_paths TEXT NOT NULL DEFAULT '[]'`,
 	},
+	{ // v4: what a task cost, as kie.ai reported it.
+		//
+		// NULL is "no record", which is what every row written before
+		// this column has, and what a query that did not say leaves. It
+		// is kept apart from 0, which kie.ai answers for a failure it did
+		// not charge for.
+		`ALTER TABLE tasks ADD COLUMN credits_consumed REAL`,
+	},
 }
 
 // migrate brings db up to the last version in ms, applying only what it has

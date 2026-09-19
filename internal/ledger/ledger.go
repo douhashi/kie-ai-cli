@@ -35,7 +35,7 @@ const timeLayout = "2006-01-02T15:04:05.000000000Z07:00"
 const busyTimeout = 5 * time.Second
 
 // columns lists the task columns in the order scanTask reads them.
-const columns = `task_id, model_id, input, status, result_urls, error, saved_paths, created_at, updated_at`
+const columns = `task_id, model_id, input, status, result_urls, error, saved_paths, credits_consumed, created_at, updated_at`
 
 // Task is one submitted task as the ledger holds it.
 type Task struct {
@@ -49,17 +49,21 @@ type Task struct {
 	// SavedPaths is where what the task produced was written on this
 	// machine, empty for a task nothing has saved yet.
 	SavedPaths []string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// CreditsConsumed is what kie.ai said the task cost, nil when no
+	// answer has said -- which is not the same as costing nothing.
+	CreditsConsumed *float64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // Result is what a task turned out to be: the state a query reported, what it
-// produced, and why it failed. The three travel together because they are read
-// out of one answer and only make sense as one.
+// produced, why it failed, and what it cost. They travel together because they
+// are read out of one answer and only make sense as one.
 type Result struct {
-	Status     string
-	ResultURLs []string
-	Error      string
+	Status          string
+	ResultURLs      []string
+	Error           string
+	CreditsConsumed *float64
 }
 
 // Ledger is an open task ledger.
@@ -139,10 +143,10 @@ func (l *Ledger) Add(ctx context.Context, taskID, modelID, status string, input 
 	now := timestamp()
 
 	// The task has produced nothing yet, so its result urls are the empty
-	// array, it has no reason to have failed for, and there is nothing of
-	// it on disk.
-	const query = `INSERT INTO tasks (` + columns + `) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	if _, err := l.db.ExecContext(ctx, query, taskID, modelID, string(encoded), status, "[]", "", "[]", now, now); err != nil {
+	// array, it has no reason to have failed for, there is nothing of it on
+	// disk, and nothing has said what it cost.
+	const query = `INSERT INTO tasks (` + columns + `) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	if _, err := l.db.ExecContext(ctx, query, taskID, modelID, string(encoded), status, "[]", "", "[]", nil, now, now); err != nil {
 		return fmt.Errorf("add task %s: %w", taskID, err)
 	}
 	return nil
@@ -228,9 +232,10 @@ func (l *Ledger) list(ctx context.Context, conditions []string, args []any, stat
 
 // Update records what a task turned out to be.
 //
-// Every field of the result is written, the reason included: a task that
-// succeeded on a later attempt would otherwise keep the reason of the one
-// before it and read as a failure that produced a result.
+// Every field of the result is written, the reason and the cost included: a
+// task that succeeded on a later attempt would otherwise keep the reason of the
+// one before it and read as a failure that produced a result, and a figure no
+// answer stands behind any more would go on reading as one that does.
 func (l *Ledger) Update(ctx context.Context, taskID string, result Result) error {
 	if result.ResultURLs == nil {
 		result.ResultURLs = []string{}
@@ -241,8 +246,8 @@ func (l *Ledger) Update(ctx context.Context, taskID string, result Result) error
 	}
 	now := timestamp()
 
-	const query = `UPDATE tasks SET status = ?, result_urls = ?, error = ?, updated_at = ? WHERE task_id = ?`
-	res, err := l.db.ExecContext(ctx, query, result.Status, string(encoded), result.Error, now, taskID)
+	const query = `UPDATE tasks SET status = ?, result_urls = ?, error = ?, credits_consumed = ?, updated_at = ? WHERE task_id = ?`
+	res, err := l.db.ExecContext(ctx, query, result.Status, string(encoded), result.Error, result.CreditsConsumed, now, taskID)
 	if err != nil {
 		return fmt.Errorf("update task %s: %w", taskID, err)
 	}
@@ -295,10 +300,14 @@ func scanTask(s scanner) (Task, error) {
 	var (
 		task                          Task
 		input, resultURLs, savedPaths string
+		credits                       sql.NullFloat64
 		createdAt, updatedAt          string
 	)
-	if err := s.Scan(&task.TaskID, &task.ModelID, &input, &task.Status, &resultURLs, &task.Error, &savedPaths, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&task.TaskID, &task.ModelID, &input, &task.Status, &resultURLs, &task.Error, &savedPaths, &credits, &createdAt, &updatedAt); err != nil {
 		return Task{}, err
+	}
+	if credits.Valid {
+		task.CreditsConsumed = &credits.Float64
 	}
 	if err := json.Unmarshal([]byte(input), &task.Input); err != nil {
 		return Task{}, fmt.Errorf("decode input of %s: %w", task.TaskID, err)

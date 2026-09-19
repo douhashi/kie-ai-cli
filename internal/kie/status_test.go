@@ -77,11 +77,34 @@ func TestQueryTaskReadsTheAnswersItSupports(t *testing.T) {
 			path: marketQueryPath,
 			data: `{"taskId":"task_12345678","model":"grok-imagine/text-to-image","state":"success",
 				"resultJson":"{\"resultUrls\":[\"https://example.com/generated-content.jpg\"]}",
-				"failCode":"","failMsg":"","costTime":15000}`,
+				"failCode":"","failMsg":"","costTime":15000,"creditsConsumed":18.0}`,
 			want: kie.TaskState{
-				Status:     kie.StatusSucceeded,
-				ResultURLs: []string{"https://example.com/generated-content.jpg"},
+				Status:          kie.StatusSucceeded,
+				ResultURLs:      []string{"https://example.com/generated-content.jpg"},
+				CreditsConsumed: credits(18),
 			},
+		},
+		{
+			// A lyrics task answers through the same endpoint, and what
+			// it cost is read the same way: a fraction is kept as one.
+			name: "a Market task that cost a fraction of a credit",
+			path: marketQueryPath,
+			data: `{"state":"success","resultJson":"{\"resultObject\":{}}","creditsConsumed":0.4}`,
+			want: kie.TaskState{Status: kie.StatusSucceeded, ResultURLs: []string{}, CreditsConsumed: credits(0.4)},
+		},
+		{
+			// Zero is an answer -- a failure kie.ai did not charge for --
+			// and is kept apart from an answer that says nothing.
+			name: "a Market task that cost nothing",
+			path: marketQueryPath,
+			data: `{"state":"fail","failCode":"500","failMsg":"timed out","creditsConsumed":0.0}`,
+			want: kie.TaskState{Status: kie.StatusFailed, ResultURLs: []string{}, Error: "500: timed out", CreditsConsumed: credits(0)},
+		},
+		{
+			name: "a Market answer whose credits are null",
+			path: marketQueryPath,
+			data: `{"state":"generating","creditsConsumed":null}`,
+			want: kie.TaskState{Status: kie.StatusRunning, ResultURLs: []string{}},
 		},
 		{
 			// Not every Market model answers with URLs: the OmniHuman
@@ -154,6 +177,11 @@ func TestQueryTaskRefusesAnAnswerItCannotPlace(t *testing.T) {
 		{name: "the Market state is unknown", path: marketQueryPath, data: `{"state":"paused"}`},
 		{name: "the Market data is null", path: marketQueryPath, data: `null`},
 		{
+			name: "the Market credits are not a number",
+			path: marketQueryPath,
+			data: `{"state":"success","creditsConsumed":"18"}`,
+		},
+		{
 			name: "the Market result is not the JSON it says it is",
 			path: marketQueryPath,
 			data: `{"state":"success","resultJson":"not json at all"}`,
@@ -187,4 +215,10 @@ func TestStatusesAreTheWholeVocabulary(t *testing.T) {
 	if want := []string{"submitted", "running"}; !reflect.DeepEqual(kie.Unfinished, want) {
 		t.Errorf("Unfinished = %v, want %v", kie.Unfinished, want)
 	}
+}
+
+// credits is the address of a consumed-credit figure, which is how an answer
+// that carried one is told apart from an answer that did not.
+func credits(v float64) *float64 {
+	return &v
 }

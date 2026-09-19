@@ -150,6 +150,30 @@ func TestUpdateRecordsAndClearsTheReason(t *testing.T) {
 	}
 }
 
+// What a task cost is written by every update, like the reason: a later answer
+// that says nothing about it leaves the row saying nothing too, rather than
+// keeping a figure no answer stands behind any more. Zero is kept as zero.
+func TestUpdateRecordsWhatATaskCost(t *testing.T) {
+	ctx := context.Background()
+	l := openTemp(t)
+	if err := l.Add(ctx, "task-1", "veo3", "submitted", nil); err != nil {
+		t.Fatalf("Add() error: %v", err)
+	}
+
+	for _, want := range []*float64{credits(18), credits(0.4), credits(0), nil} {
+		if err := l.Update(ctx, "task-1", Result{Status: "succeeded", CreditsConsumed: want}); err != nil {
+			t.Fatalf("Update() error: %v", err)
+		}
+		got, err := l.Get(ctx, "task-1")
+		if err != nil {
+			t.Fatalf("Get() error: %v", err)
+		}
+		if !reflect.DeepEqual(got.CreditsConsumed, want) {
+			t.Errorf("CreditsConsumed = %v, want %v", deref(got.CreditsConsumed), deref(want))
+		}
+	}
+}
+
 func TestUpdateUnknownTask(t *testing.T) {
 	err := openTemp(t).Update(context.Background(), "missing", Result{Status: "succeeded"})
 	if !errors.Is(err, ErrNotFound) {
@@ -563,6 +587,62 @@ func TestOpenMigratesAVersionTwoLedger(t *testing.T) {
 	}
 }
 
+// V3: a ledger written before the credits column existed is carried forward
+// with every column as it was, and its rows read back as having no record of
+// what they cost -- not as having cost nothing.
+func TestOpenMigratesAVersionThreeLedger(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "ledger.db")
+
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if err := migrate(ctx, db, migrations[:3]); err != nil {
+		t.Fatalf("migrate to v3: %v", err)
+	}
+	const insert = `INSERT INTO tasks (task_id, model_id, input, status, result_urls, error, saved_paths, created_at, updated_at)
+		VALUES ('task-1', 'veo3', '{"prompt":"a cat"}', 'succeeded', '["https://kie.example/a.png"]', 'none', '["/tmp/a.png"]', ?, ?)`
+	created := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	updated := created.Add(time.Minute)
+	if _, err := db.ExecContext(ctx, insert, created.Format(timeLayout), updated.Format(timeLayout)); err != nil {
+		t.Fatalf("insert a v3 row: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	l := open(t, path)
+	if v := schemaVersion(t, l); v != len(migrations) {
+		t.Errorf("user_version = %d, want %d", v, len(migrations))
+	}
+	got, err := l.Get(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("Get() after migration error: %v", err)
+	}
+	want := Task{
+		TaskID:     "task-1",
+		ModelID:    "veo3",
+		Input:      map[string]any{"prompt": "a cat"},
+		Status:     "succeeded",
+		ResultURLs: []string{"https://kie.example/a.png"},
+		Error:      "none",
+		SavedPaths: []string{"/tmp/a.png"},
+		CreatedAt:  created,
+		UpdatedAt:  updated,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("task = %+v, want %+v", got, want)
+	}
+	var null bool
+	if err := l.db.QueryRow("SELECT credits_consumed IS NULL FROM tasks WHERE task_id = 'task-1'").Scan(&null); err != nil {
+		t.Fatalf("read credits_consumed: %v", err)
+	}
+	if !null {
+		t.Error("credits_consumed is not NULL; a row recorded before the column existed has no record of what it cost")
+	}
+}
+
 func TestMarkSavedRecordsWhereTheResultsWent(t *testing.T) {
 	ctx := context.Background()
 	l := openTemp(t)
@@ -678,4 +758,18 @@ func ids(tasks []Task) []string {
 		out = append(out, task.TaskID)
 	}
 	return out
+}
+
+// credits is the address of a consumed-credit figure, which is how a recorded
+// figure is told apart from no record at all.
+func credits(v float64) *float64 {
+	return &v
+}
+
+// deref renders a figure that may be absent, for a failure message.
+func deref(v *float64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
