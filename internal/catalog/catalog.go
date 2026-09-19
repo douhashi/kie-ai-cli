@@ -26,7 +26,11 @@ import (
 // SchemaVersion identifies the shape of Catalog. Bump it whenever a consumer
 // would misread an older file, so a stale catalog is rejected instead of
 // silently misinterpreted.
-const SchemaVersion = 1
+//
+// 2 dropped create.style: every model is now created through the Market
+// endpoint, and a version 1 reader takes a missing style for a standard API
+// and would send a body without its model.
+const SchemaVersion = 2
 
 // MaxAge is how long an embedded catalog is taken at face value.
 //
@@ -177,22 +181,10 @@ func (c Catalog) StaleWarning(now time.Time) string {
 		c.Origin, c.GeneratedAt.Format(time.DateOnly), int(age/(24*time.Hour)))
 }
 
-// Style distinguishes the two ways kie.ai accepts a task creation request.
-type Style string
-
-const (
-	// StyleMarket is the unified Market endpoint: one path for every model,
-	// selected by the "model" field of the request body.
-	StyleMarket Style = "market"
-	// StyleDirect is a standard API with its own path per operation.
-	StyleDirect Style = "direct"
-)
-
 // Model is one create/query pair, which is what a user invokes.
 type Model struct {
-	// ID is what the user types. Market models use their kie.ai "model" value
-	// (e.g. "bytedance/seedream-v4-text-to-image"); standard APIs use their
-	// docs path (e.g. "suno-api/generate-music"), a naming rule of our own.
+	// ID is what the user types: the kie.ai "model" value the page fixes
+	// (e.g. "bytedance/seedream-v4-text-to-image").
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -209,10 +201,8 @@ type Model struct {
 type Create struct {
 	Method string `json:"method"`
 	Path   string `json:"path"`
-	Style  Style  `json:"style"`
 	// Model is the value the Market endpoint requires in its request body.
-	// Empty for StyleDirect.
-	Model string `json:"model,omitempty"`
+	Model string `json:"model"`
 }
 
 // Query is the endpoint that reports the state of a submitted task.

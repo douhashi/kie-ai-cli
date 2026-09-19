@@ -9,11 +9,19 @@ info:
   description: ''
   version: 1.0.0
 paths:
-  /api/v1/generate:
+  /api/v1/jobs/createTask:
     post:
       summary: Generate Music
       deprecated: false
       description: >-
+        :::warning Document updated
+
+        If you have already completed the integration process previously, you
+        can still access the old version document at: Old version address
+        (https://docs.kie.ai/old-model/suno-api/generate-music)
+
+        :::
+
         Generate music with or without lyrics using AI models.
 
 
@@ -32,22 +40,23 @@ paths:
         - In Custom Mode (`customMode: true`):
           - If `instrumental: true`: `style` and `title` are required
           - If `instrumental: false`: `style`, `prompt`, and `title` are required
-          - `duration` is an optional parameter and is only effective when model is set to V5_5.
+          - `duration` is an optional parameter and will only take effect when the model is ~~V5_5~~, V6, V6_MINI, or V6_WILD.
           - Character limits vary by model:
-            - **V4**: `prompt`  3000 characters, `style` 200 characters
-            - **V4_5 & V4_5PLUS**: `prompt`  5000 characters, `style` 1000 characters
-            - **V4_5ALL**: `prompt`  5000 characters, `style` 1000 characters
-            - **V5_5 & V5**: `prompt`  5000 characters, `style` 1000 characters
+            - ~~**V4**: `prompt`  3000 characters, `style` 200 characters~~
+            - ~~**V4_5 & V4_5PLUS**: `prompt`  5000 characters, `style` 1000 characters~~
+            - ~~**V4_5ALL**: `prompt`  5000 characters, `style` 1000 characters~~
+            - ~~**V5_5 & V5**: `prompt`  5000 characters, `style` 1000 characters~~
+            - **V6、V6_WILD 和 V6_MINI**: `prompt`  5000 characters, `style` 1000 characters
           - `title` length limit: 80 characters (all models)
 
-        - In Non-custom Mode (`customMode: false`):
+        - In Non-custom Mode (`custom_mode: false`):
           - Only `prompt` is required regardless of `instrumental` setting
           - `prompt` length limit: 3000 characters
           - Other parameters should be left empty
 
         ### Developer Notes
 
-        - Recommendation for new users: Start with `customMode: false` for
+        - Recommendation for new users: Start with `custom_mode: false` for
         simpler usage
 
         - Generated files are retained for 14 days
@@ -56,7 +65,7 @@ paths:
         (first track complete), `complete` (all tracks complete)
       operationId: generate-music
       tags:
-        - docs/en/Market/Suno API/Music Generation
+        - docs/en/Market/Music Models/Suno/Music Generation
       parameters: []
       requestBody:
         content:
@@ -64,150 +73,32 @@ paths:
             schema:
               type: object
               required:
-                - prompt
-                - customMode
-                - instrumental
                 - model
-                - callBackUrl
+                - input
               properties:
-                prompt:
-                  type: string
-                  description: >-
-                    A description of the desired audio content.  
-
-                    - In Custom Mode (`customMode: true`): Required if
-                    `instrumental` is `false`. The prompt will be strictly used
-                    as the lyrics and sung in the generated track. Character
-                    limits by model:  
-                      - **V4**: Maximum 3000 characters  
-                      - **V4_5 & V4_5PLUS**: Maximum 5000 characters  
-                      - **V4_5ALL**: Maximum 5000 characters  
-                      - **V5_5 & V5**: Maximum 5000 characters  
-                      Example: "A calm and relaxing piano track with soft melodies"  
-                    - In Non-custom Mode (`customMode: false`): Always required.
-                    The prompt serves as the core idea, and lyrics will be
-                    automatically generated based on it (not strictly matching
-                    the input). Maximum 3000 characters.  
-                      Example: "A short relaxing piano tune"
-                  examples:
-                    - A calm and relaxing piano track with soft melodies
-                style:
-                  type: string
-                  description: >-
-                    Music style specification for the generated audio.  
-
-                    - Required in Custom Mode (`customMode: true`). Defines the
-                    genre, mood, or artistic direction.  
-
-                    - Character limits by model:  
-                      - **V4**: Maximum 200 characters  
-                      - **V4_5 & V4_5PLUS**: Maximum 1000 characters  
-                      - **V4_5ALL**: Maximum 1000 characters  
-                      - **V5_5 & V5**: Maximum 1000 characters  
-                    - Common examples: Jazz, Classical, Electronic, Pop, Rock,
-                    Hip-hop, etc.
-                  examples:
-                    - Classical
-                title:
-                  type: string
-                  description: |-
-                    Title for the generated music track.  
-                    - Required in Custom Mode (`customMode: true`).  
-                    - Max length: 80 characters.  
-                    - Will be displayed in player interfaces and filenames.
-                  examples:
-                    - Peaceful Piano Meditation
-                customMode:
-                  type: boolean
-                  description: >-
-                    Determines if advanced parameter customization is enabled.  
-
-                    - If `true`: Allows detailed control with specific
-                    requirements for `style` and `title` fields.  
-
-                    - If `false`: Simplified mode where only `prompt` is
-                    required and other parameters are ignored.
-                  examples:
-                    - true
-                instrumental:
-                  type: boolean
-                  description: >-
-                    Determines if the audio should be instrumental (no
-                    lyrics).  
-
-                    - In Custom Mode (`customMode: true`):  
-                      - If `true`: Only `style` and `title` are required.  
-                      - If `false`: `style`, `title`, and `prompt` are required (with prompt used as the exact lyrics).  
-                    - In Non-custom Mode (`customMode: false`): No impact on
-                    required fields (prompt only).
-                  examples:
-                    - true
                 model:
                   type: string
-                  description: |-
-                    The AI model version to use for generation.  
-                    - Required for all requests.  
-                    - Available options:  
-                      - **`V5_5`**：Custom Models Tailored to Your Unique Taste.  
-                      - **`V5`**: Superior musical expression, faster generation.  
-                      - **`V4_5PLUS`**: V4.5+ delivers richer sound, new ways to create, max 8 min.  
-                      - **`V4_5`**: V4.5 enables smarter prompts, faster generations, max 8 min.  
-                      - **`V4_5ALL`**: V4.5ALL enables smarter prompts, faster generations, max 8 min.  
-                      - **`V4`**: V4 improves vocal quality, max 4 min.
-                  enum:
-                    - V4
-                    - V4_5
-                    - V4_5PLUS
-                    - V4_5ALL
-                    - V5
-                    - V5_5
+                  description: The model name to use for generation. Required field.
                   examples:
-                    - V4
-                  x-apidog-enum:
-                    - value: V4
-                      name: ''
-                      description: ''
-                    - value: V4_5
-                      name: ''
-                      description: ''
-                    - value: V4_5PLUS
-                      name: ''
-                      description: ''
-                    - value: V4_5ALL
-                      name: ''
-                      description: ''
-                    - value: V5
-                      name: ''
-                      description: ''
-                    - value: V5_5
-                      name: ''
-                      description: ''
+                    - ai-music-api/generate
                 callBackUrl:
                   type: string
                   format: uri
                   description: >-
-                    The URL to receive music generation task completion updates.
-                    Required for all music generation requests.
+                    The URL to receive generation task completion updates.
+                    Optional but recommended for production use.
 
 
                     - System will POST task status and results to this URL when
                     generation completes
 
-                    - Callback process has three stages: `text` (text
-                    generation), `first` (first track complete), `complete` (all
-                    tracks complete)
-
-                    - Note: Some cases may skip `text` and `first` stages and
-                    return `complete` directly
+                    - Callback includes generated content URLs and task
+                    information
 
                     - Your callback endpoint should accept POST requests with
-                    JSON payload containing task results and audio URLs
+                    JSON payload containing results
 
-                    - For detailed callback format and implementation guide, see
-                    [Music Generation
-                    Callbacks](https://docs.kie.ai/suno-api/generate-music-callbacks)
-
-                    - Alternatively, use the Get Music Details endpoint to poll
+                    - Alternatively, use the Get Task Details endpoint to poll
                     task status
 
                     - To ensure callback security, see [Webhook Verification
@@ -215,138 +106,301 @@ paths:
                     verification implementation
                   examples:
                     - https://api.example.com/callback
-                negativeTags:
-                  type: string
-                  description: >-
-                    Music styles or traits to exclude from the generated audio.
-                    Optional. Use to avoid specific styles.
-                  examples:
-                    - Heavy Metal, Upbeat Drums
-                vocalGender:
-                  type: string
-                  description: >-
-                    Vocal gender preference for the singing voice. Optional. Use
-                    'm' for male and 'f' for female. Note: This parameter is
-                    only effective when customMode is true. Based on practice,
-                    this parameter can only increase the probability but cannot
-                    guarantee adherence to male/female voice instructions.
-                  enum:
-                    - m
-                    - f
-                  examples:
-                    - m
-                styleWeight:
-                  type: number
-                  description: >-
-                    Strength of adherence to the specified style. Optional.
-                    Range 0–1, up to 2 decimal places.
-                  minimum: 0
-                  maximum: 1
-                  multipleOf: 0.01
-                  examples:
-                    - 0.65
-                weirdnessConstraint:
-                  type: number
-                  description: >-
-                    Controls experimental/creative deviation. Optional. Range
-                    0–1, up to 2 decimal places.
-                  minimum: 0
-                  maximum: 1
-                  multipleOf: 0.01
-                  examples:
-                    - 0.65
-                audioWeight:
-                  type: number
-                  description: >-
-                    Balance weight for audio features vs. other factors.
-                    Optional. Range 0–1, up to 2 decimal places.
-                  minimum: 0
-                  maximum: 1
-                  multipleOf: 0.01
-                  examples:
-                    - 0.65
-                personaId:
-                  type: string
-                  description: >-
-                    Only available when Custom Mode (`customMode: true`) is
-                    enabled. Persona ID or Voice ID to apply to the generated
-                    music. Optional. Use this to apply a specific persona style
-                    to your music generation. 
+                input:
+                  type: object
+                  description: Input parameters for the generation task
+                  properties:
+                    prompt:
+                      type: string
+                      description: >-
+                        A description of the desired audio content.  
+
+                        - In Custom Mode (`customMode: true`): Required if
+                        `instrumental` is `false`. The prompt will be strictly
+                        used as the lyrics and sung in the generated track.
+                        Character limits by model:  
+                          - **V4**（Discontinued）: Maximum 3000 characters  
+                          - **V4_5 & V4_5PLUS**（Discontinued）: Maximum 5000 characters  
+                          - **V4_5ALL**（Discontinued）: Maximum 5000 characters  
+                          - **V5_5 & V5**（Discontinued）: Maximum 5000 characters  
+                          - **V6、V6_MINI 和 V6_WILD**: Maximum 5000 characters  
+                          Example: "A calm and relaxing piano track with soft melodies"  
+                        - In Non-custom Mode (`customMode: false`): Always
+                        required. The prompt serves as the core idea, and lyrics
+                        will be automatically generated based on it (not
+                        strictly matching the input). Maximum 3000 characters.  
+                          Example: "A short relaxing piano tune"
+                      examples:
+                        - A calm and relaxing piano track with soft melodies
+                    image_urls:
+                      type: array
+                      description: >-
+                        Array of referenced image URLs.
+
+                        - Supported formats: JPEG, JPG, PNG, WEBP.
+
+                        - Limits: Maximum 10MB per image, up to 5 images in
+                        total.
+
+                        - Note: When images are provided, the `prompt` parameter
+                        becomes optional.
+
+                        - Effective only when customMode is false.
+                      items:
+                        type: string
+                      maxItems: 5
+                    style:
+                      type: string
+                      description: >-
+                        Music style specification for the generated audio.  
+
+                        - Required in Custom Mode (`customMode: true`). Defines
+                        the genre, mood, or artistic direction.  
+
+                        - Character limits by model:  
+                          - **V4**（Discontinued）: Maximum 200 characters  
+                          - **V4_5 & V4_5PLUS**（Discontinued）: Maximum 1000 characters  
+                          - **V4_5ALL**（Discontinued）: Maximum 1000 characters  
+                          - **V5_5 & V5**（Discontinued）: Maximum 1000 characters  
+                          - **V6、V6_MINI 和 V6_WILD**: Maximum 1000 characters 
+                        - Common examples: Jazz, Classical, Electronic, Pop,
+                        Rock, Hip-hop, etc.
+                      examples:
+                        - Classical
+                    title:
+                      type: string
+                      description: |-
+                        Title for the generated music track.  
+                        - Required in Custom Mode (`customMode: true`).  
+                        - Max length: 80 characters.  
+                        - Will be displayed in player interfaces and filenames.
+                      examples:
+                        - Peaceful Piano Meditation
+                    custom_mode:
+                      type: boolean
+                      description: >-
+                        Determines if advanced parameter customization is
+                        enabled.  
+
+                        - If `true`: Allows detailed control with specific
+                        requirements for `style` and `title` fields.  
+
+                        - If `false`: Simplified mode where only `prompt` is
+                        required and other parameters are ignored.
+                      examples:
+                        - true
+                    instrumental:
+                      type: boolean
+                      description: >-
+                        Determines if the audio should be instrumental (no
+                        lyrics).  
+
+                        - In Custom Mode (`custom_mode: true`):  
+                          - If `true`: Only `style` and `title` are required.  
+                          - If `false`: `style`, `title`, and `prompt` are required (with prompt used as the exact lyrics).  
+                        - In Non-custom Mode (`custom_mode: false`): No impact
+                        on required fields (prompt only).
+                      examples:
+                        - true
+                    model:
+                      type: string
+                      description: |+
+                        The AI model version to use for generation.  
+                        - Required for all requests.  
+                        - Available options:  
+                          - **`V6_WILD`**：Pushes creative boundaries for bolder, more distinctive musical expression.
+                          - **`V6_MINI`**：Lightweight and fast, balancing quality and speed for effortless creation.
+                          - **`V6`**：Greater musical expression with more natural vocals and richer details.
+                          - **`V5_5`**（Discontinued）：Custom Models Tailored to Your Unique Taste.  
+                          - **`V5`**（Discontinued）: Superior musical expression, faster generation.  
+                          - **`V4_5PLUS`**（Discontinued）: V4.5+ delivers richer sound, new ways to create, max 8 min.  
+                          - **`V4_5`**（Discontinued）: V4.5 enables smarter prompts, faster generations, max 8 min.  
+                          - **`V4_5ALL`**（Discontinued）: V4.5ALL enables smarter prompts, faster generations, max 8 min.  
+                          - **`V4`**（Discontinued）: V4 improves vocal quality, max 4 min.
+
+                      enum:
+                        - V4
+                        - V4_5
+                        - V4_5PLUS
+                        - V4_5ALL
+                        - V5
+                        - V5_5
+                        - V6
+                        - V6_MINI
+                        - V6_WILD
+                      x-apidog-enum:
+                        - value: V4
+                          name: ''
+                          description: ''
+                        - value: V4_5
+                          name: ''
+                          description: ''
+                        - value: V4_5PLUS
+                          name: ''
+                          description: ''
+                        - value: V4_5ALL
+                          name: ''
+                          description: ''
+                        - value: V5
+                          name: ''
+                          description: ''
+                        - value: V5_5
+                          name: ''
+                          description: ''
+                        - value: V6
+                          name: ''
+                          description: ''
+                        - value: V6_MINI
+                          name: ''
+                          description: ''
+                        - value: V6_WILD
+                          name: ''
+                          description: ''
+                      default: V6
+                      examples:
+                        - V6
+                    negative_tags:
+                      type: string
+                      description: >-
+                        Music styles or traits to exclude from the generated
+                        audio. Optional. Use to avoid specific styles.
+                      examples:
+                        - Heavy Metal, Upbeat Drums
+                    vocal_gender:
+                      type: string
+                      description: >-
+                        Vocal gender preference for the singing voice. Optional.
+                        Use 'm' for male and 'f' for female. Note: This
+                        parameter is only effective when custom_mode is true.
+                        Based on practice, this parameter can only increase the
+                        probability but cannot guarantee adherence to
+                        male/female voice instructions.
+                      enum:
+                        - m
+                        - f
+                      examples:
+                        - m
+                    style_weight:
+                      type: number
+                      description: >-
+                        Strength of adherence to the specified style. Optional.
+                        Range 0–1, up to 2 decimal places.
+                      minimum: 0
+                      maximum: 1
+                      multipleOf: 0.01
+                      examples:
+                        - 0.65
+                    weirdness_constraint:
+                      type: number
+                      description: >-
+                        Controls experimental/creative deviation. Optional.
+                        Range 0–1, up to 2 decimal places.
+                      minimum: 0
+                      maximum: 1
+                      multipleOf: 0.01
+                      examples:
+                        - 0.65
+                    audio_weight:
+                      type: number
+                      description: >-
+                        Balance weight for audio features vs. other factors.
+                        Optional. Range 0–1, up to 2 decimal places.
+                      minimum: 0
+                      maximum: 1
+                      multipleOf: 0.01
+                      examples:
+                        - 0.65
+                    persona_id:
+                      type: string
+                      description: >-
+                        Only available when Custom Mode (`custom_mode: true`) is
+                        enabled. Persona ID or Voice ID to apply to the
+                        generated music. Optional. Use this to apply a specific
+                        persona style to your music generation. 
 
 
-                    To generate a persona ID, use the [Generate
-                    Persona](https://docs.kie.ai/suno-api/generate-persona)
-                    endpoint to create a personalized music Persona based on
-                    generated music.
+                        To generate a persona ID, use the [Generate
+                        Persona](https://docs.kie.ai/suno-api/generate-persona)
+                        endpoint to create a personalized music Persona based on
+                        generated music.
 
 
-                    To generate a Voice ID, use the [Generate
-                    Voice](https://docs.kie.ai/suno-api/suno-voice-generate)endpoint
-                  examples:
-                    - persona_123
-                personaModel:
-                  type: string
-                  enum:
-                    - style_persona
-                    - voice_persona
-                  x-apidog-enum:
-                    - value: style_persona
-                      name: ''
-                      description: ''
-                    - value: voice_persona
-                      name: ''
-                      description: ''
-                  description: >-
-                    The persona model is only available for models version 5 and
-                    5.5.
-                duration:
-                  type: number
-                  default: 20
-                  examples:
-                    - 20
-                  minimum: 10
-                  maximum: 360
-                  description: >-
-                    Audio duration. Optional; only effective when custom_mode is
-                    true and model is V5_5.
+                        To generate a Voice ID, use the [Generate
+                        Voice](https://docs.kie.ai/suno-api/suno-voice-generate)endpoint
+                      examples:
+                        - persona_123
+                    persona_model:
+                      type: string
+                      enum:
+                        - style_persona
+                        - voice_persona
+                      x-apidog-enum:
+                        - value: style_persona
+                          name: ''
+                          description: ''
+                        - value: voice_persona
+                          name: ''
+                          description: ''
+                      description: >-
+                        The persona model is only applicable to the V5
+                        (deactivated), V5.5 (deactivated), V6, V6_MINI, and
+                        V6_WILD models.
+                    duration:
+                      type: number
+                      default: 20
+                      examples:
+                        - 20
+                      minimum: 10
+                      maximum: 360
+                      description: >-
+                        Audio duration. Optional; It is only valid when
+                        custom_mode is true and the model is V5_5 (deprecated),
+                        V6, V6_MINI, or V6_WILD.
+                  required:
+                    - prompt
+                    - custom_mode
+                    - instrumental
+                    - model
+                  x-apidog-orders:
+                    - prompt
+                    - image_urls
+                    - style
+                    - title
+                    - custom_mode
+                    - instrumental
+                    - model
+                    - negative_tags
+                    - vocal_gender
+                    - style_weight
+                    - weirdness_constraint
+                    - audio_weight
+                    - persona_id
+                    - persona_model
+                    - duration
+                  x-apidog-ignore-properties: []
               x-apidog-orders:
-                - prompt
-                - style
-                - title
-                - customMode
-                - instrumental
                 - model
                 - callBackUrl
-                - negativeTags
-                - vocalGender
-                - styleWeight
-                - weirdnessConstraint
-                - audioWeight
-                - personaId
-                - personaModel
-                - duration
-                - 01KH5V28NSDZMWXJ325JSPFS29
-              x-apidog-refs:
-                01KH5V28NSDZMWXJ325JSPFS29:
-                  type: object
-                  properties: {}
+                - input
               x-apidog-ignore-properties: []
             example:
-              prompt: A calm and relaxing piano track with soft melodies
-              customMode: true
-              instrumental: true
-              model: V4
+              model: ai-music-api/generate
               callBackUrl: https://api.example.com/callback
-              style: Classical
-              title: Peaceful Piano Meditation
-              negativeTags: Heavy Metal, Upbeat Drums
-              vocalGender: m
-              styleWeight: 0.65
-              weirdnessConstraint: 0.65
-              audioWeight: 0.65
-              personaId: persona_123
-              personaModel: style_persona
-              duration: 20
+              input:
+                prompt: A calm and relaxing piano track with soft melodies
+                custom_mode: true
+                instrumental: true
+                model: V4
+                style: Classical
+                title: Peaceful Piano Meditation
+                negative_tags: Heavy Metal, Upbeat Drums
+                vocal_gender: m
+                style_weight: 0.65
+                weirdness_constraint: 0.65
+                audio_weight: 0.65
+                persona_id: persona_123
+                persona_model: style_persona
+                duration: 20
       responses:
         '200':
           description: Request successful
@@ -679,9 +733,9 @@ paths:
                       example:
                         code: 200
                         msg: success
-      x-apidog-folder: docs/en/Market/Suno API/Music Generation
+      x-apidog-folder: docs/en/Market/Music Models/Suno/Music Generation
       x-apidog-status: released
-      x-run-in-apidog: https://app.apidog.com/web/project/1184766/apis/api-28506283-run
+      x-run-in-apidog: https://app.apidog.com/web/project/1184766/apis/api-43206407-run
 components:
   schemas: {}
   securitySchemes:

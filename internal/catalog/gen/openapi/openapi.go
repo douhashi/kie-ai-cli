@@ -93,20 +93,38 @@ func (o *Operation) RequestProperty(name string) (map[string]any, error) {
 	return property, nil
 }
 
-// SingleEnumString returns the only value a schema's enum permits. More than
+// FixedString returns the one value a schema fixes. kie.ai states it in
+// whichever of enum, default and examples the page's author reached for -- a
+// Market page usually holds a one-value enum, while the pages moved over from
+// its older per-model APIs hold a default and an example, or only the example
+// -- so every one of them present has to name the same single value. More than
 // one value means the page documents several models at once, which the catalog
 // has no way to name.
-func SingleEnumString(schema map[string]any) (string, error) {
-	values, ok := schema["enum"].([]any)
-	if !ok {
-		return "", fmt.Errorf("schema has no enum")
+func FixedString(schema map[string]any) (string, error) {
+	var candidates []any
+	if values, ok := schema["enum"].([]any); ok {
+		if len(values) != 1 {
+			return "", fmt.Errorf("enum has %d values, want exactly 1: %v", len(values), values)
+		}
+		candidates = append(candidates, values[0])
 	}
-	if len(values) != 1 {
-		return "", fmt.Errorf("enum has %d values, want exactly 1: %v", len(values), values)
+	if value, ok := schema["default"]; ok {
+		candidates = append(candidates, value)
 	}
-	value, ok := values[0].(string)
+	if values, ok := schema["examples"].([]any); ok {
+		candidates = append(candidates, values...)
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("schema has no enum, default or examples to fix a value with")
+	}
+	value, ok := candidates[0].(string)
 	if !ok {
-		return "", fmt.Errorf("enum value %v is not a string", values[0])
+		return "", fmt.Errorf("value %v is not a string", candidates[0])
+	}
+	for _, other := range candidates[1:] {
+		if other != value {
+			return "", fmt.Errorf("enum, default and examples disagree: %v", candidates)
+		}
 	}
 	return value, nil
 }

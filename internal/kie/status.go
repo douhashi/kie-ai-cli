@@ -11,11 +11,9 @@ import (
 
 // The states a task is in, as this tool records them.
 //
-// kie.ai has no single vocabulary of its own: the Market endpoint answers with
-// waiting/queuing/generating/success/fail, the Suno endpoints with PENDING and
-// a family of *_FAILED, and others with a numeric flag. Every answer is
-// normalised to one of these four before it is written down, so that a listing
-// reads the same whichever endpoint produced the row.
+// The Market endpoint answers with waiting/queuing/generating/success/fail.
+// Every answer is normalised to one of these four before it is written down,
+// so that the ledger speaks one vocabulary of its own rather than kie.ai's.
 const (
 	// StatusSubmitted is a task kie.ai has accepted and that nothing has
 	// asked about since.
@@ -25,7 +23,7 @@ const (
 	// to a caller who can only wait.
 	StatusRunning = "running"
 	// StatusSucceeded is a task that finished. It does not promise a URL:
-	// the lyrics endpoint answers with the text itself.
+	// a lyrics task answers with the text itself.
 	StatusSucceeded = "succeeded"
 	// StatusFailed is a task that will not produce anything.
 	StatusFailed = "failed"
@@ -51,20 +49,14 @@ type decoder func(json.RawMessage) (TaskState, error)
 
 // decoders maps a query endpoint to the reader for the answers it gives.
 //
-// It holds the three endpoints whose answers have been read against the live
-// API, which is 145 of the catalog's 161 models. The rest are absent rather
-// than guessed at: the documentation describes fourteen different shapes over
-// fifteen paths, and the state field alone is spelled state, status or
-// successFlag, with successFlag arriving as both an integer and a string --
-// and its integer 2 meaning "failed" on the veo3 and flux endpoints while
-// meaning "generating" on the Suno cover endpoint. A decoder written from the
-// documentation would therefore report some failures as progress and some
-// successes as failures, and every test written from the same documentation
-// would pass. Issue #36 adds the remaining twelve, each against a real task.
+// Every model in the catalog is followed through the Market endpoint (#51).
+// Any other path is absent rather than guessed at: kie.ai's older per-model
+// endpoints each answered in a shape of their own, and a decoder written from
+// documentation alone would report some failures as progress and some
+// successes as failures while every test written from the same documentation
+// passed.
 var decoders = map[string]decoder{
-	"/api/v1/jobs/recordInfo":      decodeMarket,
-	"/api/v1/generate/record-info": decodeSuno,
-	"/api/v1/lyrics/record-info":   decodeLyrics,
+	"/api/v1/jobs/recordInfo": decodeMarket,
 }
 
 // QueryTask asks kie.ai what became of one task and normalises the answer.
@@ -152,79 +144,6 @@ func marketResultURLs(resultJSON string) ([]string, error) {
 	return result.ResultURLs, nil
 }
 
-// sunoStates maps the vocabulary the Suno endpoints share.
-//
-// One map serves both because both are the same service reporting on the same
-// kinds of failure; only the verb in the middle of GENERATE_*_FAILED differs,
-// and accepting the other family's spelling of a failure cannot turn one
-// outcome into another.
-//
-// TEXT_SUCCESS and FIRST_SUCCESS are running rather than succeeded: they say
-// part of the work is done, and a task recorded as finished on the strength of
-// them would never be asked about again.
-var sunoStates = map[string]string{
-	"PENDING":                StatusRunning,
-	"TEXT_SUCCESS":           StatusRunning,
-	"FIRST_SUCCESS":          StatusRunning,
-	"SUCCESS":                StatusSucceeded,
-	"CREATE_TASK_FAILED":     StatusFailed,
-	"GENERATE_AUDIO_FAILED":  StatusFailed,
-	"GENERATE_LYRICS_FAILED": StatusFailed,
-	"CALLBACK_EXCEPTION":     StatusFailed,
-	"SENSITIVE_WORD_ERROR":   StatusFailed,
-}
-
-// sunoAnswer is the part of the Suno music answer that decides the outcome.
-type sunoAnswer struct {
-	Response struct {
-		SunoData []struct {
-			AudioURL string `json:"audioUrl"`
-		} `json:"sunoData"`
-	} `json:"response"`
-	Status       string `json:"status"`
-	ErrorCode    scalar `json:"errorCode"`
-	ErrorMessage string `json:"errorMessage"`
-}
-
-func decodeSuno(raw json.RawMessage) (TaskState, error) {
-	var answer sunoAnswer
-	if err := json.Unmarshal(raw, &answer); err != nil {
-		return TaskState{}, fmt.Errorf("the answer is not the one this endpoint gives: %s", snippet(raw))
-	}
-	status, err := place(sunoStates, answer.Status, "status")
-	if err != nil {
-		return TaskState{}, err
-	}
-	urls := []string{}
-	for _, track := range answer.Response.SunoData {
-		if track.AudioURL != "" {
-			urls = append(urls, track.AudioURL)
-		}
-	}
-	return TaskState{Status: status, ResultURLs: urls, Error: reason(string(answer.ErrorCode), answer.ErrorMessage)}, nil
-}
-
-// lyricsAnswer is the part of the lyrics answer that decides the outcome. The
-// lyrics themselves are text in the answer rather than a file behind a URL, so
-// this endpoint has no results to record.
-type lyricsAnswer struct {
-	Status       string `json:"status"`
-	ErrorCode    scalar `json:"errorCode"`
-	ErrorMessage string `json:"errorMessage"`
-}
-
-func decodeLyrics(raw json.RawMessage) (TaskState, error) {
-	var answer lyricsAnswer
-	if err := json.Unmarshal(raw, &answer); err != nil {
-		return TaskState{}, fmt.Errorf("the answer is not the one this endpoint gives: %s", snippet(raw))
-	}
-	status, err := place(sunoStates, answer.Status, "status")
-	if err != nil {
-		return TaskState{}, err
-	}
-	return TaskState{Status: status, ResultURLs: []string{}, Error: reason(string(answer.ErrorCode), answer.ErrorMessage)}, nil
-}
-
 // place translates one endpoint's word for where a task has got to.
 //
 // A word that is not in the table is an error rather than a default. Any
@@ -274,8 +193,8 @@ func reason(code, message string) string {
 }
 
 // scalar is a field kie.ai does not spell consistently: failCode is documented
-// as a string and errorCode as an integer, and both arrive as null when there
-// is nothing to report. It reads all three as the text the field would be
+// as a string, may arrive as an integer, and arrives as null when there is
+// nothing to report. It reads all three as the text the field would be
 // printed as, so that which spelling arrived cannot decide whether the row can
 // be read at all.
 type scalar string

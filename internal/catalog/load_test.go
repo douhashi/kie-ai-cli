@@ -24,7 +24,7 @@ func downloadedJSON(t *testing.T, schemaVersion int) []byte {
 		Models: []catalog.Model{{
 			ID: downloadedID, Name: "Only Downloaded", Category: "image", Vendor: "acme",
 			DocsURL: "https://docs.kie.ai/acme",
-			Create:  catalog.Create{Method: "POST", Path: "/api/v1/jobs", Style: catalog.StyleMarket, Model: downloadedID},
+			Create:  catalog.Create{Method: "POST", Path: "/api/v1/jobs", Model: downloadedID},
 			Query:   catalog.Query{Method: "GET", Path: "/api/v1/jobs", Param: "taskId"},
 			Input:   map[string]any{"type": "object"},
 		}},

@@ -9,14 +9,10 @@ import (
 	"github.com/douhashi/kie-ai-cli/internal/kie"
 )
 
-// The three endpoints whose answers this build reads. They are written out
-// here rather than taken from the catalog, so that the wire contract is
-// asserted against fixed strings.
-const (
-	marketQueryPath = "/api/v1/jobs/recordInfo"
-	sunoQueryPath   = "/api/v1/generate/record-info"
-	lyricsQueryPath = "/api/v1/lyrics/record-info"
-)
+// The endpoint whose answers this build reads. It is written out here rather
+// than taken from the catalog, so that the wire contract is asserted against a
+// fixed string.
+const marketQueryPath = "/api/v1/jobs/recordInfo"
 
 // envelope wraps a data document the way every kie.ai answer arrives.
 func envelope(data string) string {
@@ -120,84 +116,13 @@ func TestQueryTaskReadsTheAnswersItSupports(t *testing.T) {
 			want: kie.TaskState{Status: kie.StatusFailed, ResultURLs: []string{}, Error: "501: Generation Failed"},
 		},
 		{
-			// failCode is documented as a string; the same field is an
-			// integer on the Suno endpoints, so neither spelling may
-			// decide whether the row can be read.
+			// failCode is documented as a string and may arrive as an
+			// integer, so neither spelling may decide whether the row can
+			// be read.
 			name: "a Market failure whose code is a number",
 			path: marketQueryPath,
 			data: `{"state":"fail","failCode":501,"failMsg":"Generation Failed"}`,
 			want: kie.TaskState{Status: kie.StatusFailed, ResultURLs: []string{}, Error: "501: Generation Failed"},
-		},
-		{
-			// The example the Suno documentation prints, shortened to
-			// the fields that decide the outcome.
-			name: "a Suno task that succeeded",
-			path: sunoQueryPath,
-			data: `{"taskId":"5c79be8e","response":{"taskId":"5c79be8e","sunoData":[
-				{"id":"e231","audioUrl":"https://example.cn/one.mp3","duration":198.44},
-				{"id":"e232","audioUrl":"https://example.cn/two.mp3","duration":201.1}]},
-				"status":"SUCCESS","errorCode":null,"errorMessage":null}`,
-			want: kie.TaskState{
-				Status:     kie.StatusSucceeded,
-				ResultURLs: []string{"https://example.cn/one.mp3", "https://example.cn/two.mp3"},
-			},
-		},
-		{
-			// The first track is ready and the rest are not: the task
-			// is still running, and what it has produced so far is not
-			// what it will have produced.
-			name: "a Suno task that has its first track",
-			path: sunoQueryPath,
-			data: `{"status":"FIRST_SUCCESS","response":{"sunoData":[{"audioUrl":"https://example.cn/one.mp3"}]}}`,
-			want: kie.TaskState{Status: kie.StatusRunning, ResultURLs: []string{"https://example.cn/one.mp3"}},
-		},
-		{
-			name: "a Suno task that is pending",
-			path: sunoQueryPath,
-			data: `{"status":"PENDING","response":null}`,
-			want: kie.TaskState{Status: kie.StatusRunning, ResultURLs: []string{}},
-		},
-		{
-			name: "a Suno task that failed",
-			path: sunoQueryPath,
-			data: `{"status":"GENERATE_AUDIO_FAILED","errorCode":400,"errorMessage":"Lyrics contained copyrighted material."}`,
-			want: kie.TaskState{
-				Status:     kie.StatusFailed,
-				ResultURLs: []string{},
-				Error:      "400: Lyrics contained copyrighted material.",
-			},
-		},
-		{
-			// The example the lyrics documentation prints. The lyrics
-			// themselves are in the answer rather than behind a URL,
-			// so a success with nothing to download is the normal case
-			// for this endpoint.
-			name: "a lyrics task that succeeded",
-			path: lyricsQueryPath,
-			data: `{"taskId":"11dc8b0f","response":{"taskId":"11dc8b0f","data":[
-				{"text":"[Verse]","title":"song","status":"complete","errorMessage":""}]},
-				"status":"SUCCESS","errorCode":null,"errorMessage":null}`,
-			want: kie.TaskState{Status: kie.StatusSucceeded, ResultURLs: []string{}},
-		},
-		{
-			name: "a lyrics task that was refused",
-			path: lyricsQueryPath,
-			data: `{"status":"SENSITIVE_WORD_ERROR","errorCode":400,"errorMessage":"Song Description flagged for moderation"}`,
-			want: kie.TaskState{
-				Status:     kie.StatusFailed,
-				ResultURLs: []string{},
-				Error:      "400: Song Description flagged for moderation",
-			},
-		},
-		{
-			name: "a failure the endpoint gives no code for",
-			path: lyricsQueryPath,
-			data: `{"status":"CALLBACK_EXCEPTION","errorCode":null,"errorMessage":"the callback could not be reached"}`,
-			want: kie.TaskState{
-				Status:     kie.StatusFailed,
-				ResultURLs: []string{},
-				Error:      "the callback could not be reached",
-			},
 		},
 	}
 	for _, tt := range tests {
@@ -228,9 +153,6 @@ func TestQueryTaskRefusesAnAnswerItCannotPlace(t *testing.T) {
 		{name: "the Market state is missing", path: marketQueryPath, data: `{"resultJson":""}`},
 		{name: "the Market state is unknown", path: marketQueryPath, data: `{"state":"paused"}`},
 		{name: "the Market data is null", path: marketQueryPath, data: `null`},
-		{name: "the Suno status is missing", path: sunoQueryPath, data: `{"response":{"sunoData":[]}}`},
-		{name: "the Suno status is unknown", path: sunoQueryPath, data: `{"status":"HALF_SUCCESS"}`},
-		{name: "the lyrics status is unknown", path: lyricsQueryPath, data: `{"status":"MOSTLY_DONE"}`},
 		{
 			name: "the Market result is not the JSON it says it is",
 			path: marketQueryPath,

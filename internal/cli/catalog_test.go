@@ -26,18 +26,28 @@ type catalogState struct {
 // command that answers with it can only be reading the downloaded one.
 const newModelID = "acme/published-after-this-build"
 
-// download puts a catalog of one model where the CLI keeps the downloaded one,
-// which is the state `catalog update` leaves behind: the two published files
-// and the index derived from them.
-func download(t *testing.T, layout paths.Layout, generatedAt string) {
-	t.Helper()
-	models := []catalog.Model{{
+// publishedModel is a model the embedded catalog cannot hold.
+func publishedModel() catalog.Model {
+	return catalog.Model{
 		ID: newModelID, Name: "Published After", Category: "image", Vendor: "acme",
 		DocsURL: "https://docs.kie.ai/acme",
-		Create:  catalog.Create{Method: "POST", Path: "/api/v1/jobs", Style: catalog.StyleMarket, Model: newModelID},
+		Create:  catalog.Create{Method: "POST", Path: "/api/v1/jobs", Model: newModelID},
 		Query:   catalog.Query{Method: "GET", Path: "/api/v1/jobs", Param: "taskId"},
 		Input:   map[string]any{"type": "object"},
-	}}
+	}
+}
+
+// download puts a catalog of one model where the CLI keeps the downloaded one,
+// which is the state `catalog update` leaves behind.
+func download(t *testing.T, layout paths.Layout, generatedAt string) {
+	t.Helper()
+	downloadModels(t, layout, generatedAt, []catalog.Model{publishedModel()})
+}
+
+// downloadModels puts a catalog of the given models where the CLI keeps the
+// downloaded one: the two published files and the index derived from them.
+func downloadModels(t *testing.T, layout paths.Layout, generatedAt string, models []catalog.Model) {
+	t.Helper()
 	encoded, err := json.Marshal(catalog.Catalog{SchemaVersion: catalog.SchemaVersion, Models: models})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

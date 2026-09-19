@@ -95,7 +95,7 @@ func runTaskRun(e *env, m catalog.Model, schema inputSchema, fields []*field, do
 	}
 	defer func() { _ = l.Close() }()
 
-	taskID, err := client.CreateTask(ctx, m.Create.Path, requestBody(m, input))
+	taskID, err := client.CreateTask(ctx, m.Create.Path, marketRequest{Model: m.Create.Model, Input: input})
 	if err != nil {
 		return err
 	}
@@ -113,22 +113,13 @@ func runTaskRun(e *env, m catalog.Model, schema inputSchema, fields []*field, do
 
 // marketRequest is the body the Market endpoint takes: one path serves every
 // model, so the model is named beside the input it is given.
+//
+// It carries no callBackUrl. Nothing here is listening on one, and an address
+// that answers nothing would have kie.ai retrying against it; the state of a
+// task is asked for instead.
 type marketRequest struct {
 	Model string         `json:"model"`
 	Input map[string]any `json:"input"`
-}
-
-// requestBody wraps the input the way the endpoint this model is submitted to
-// expects it.
-//
-// Neither form carries a callBackUrl. Nothing here is listening on one, and an
-// address that answers nothing would have kie.ai retrying against it; the state
-// of a task is asked for instead.
-func requestBody(m catalog.Model, input map[string]any) any {
-	if m.Create.Style == catalog.StyleMarket {
-		return marketRequest{Model: m.Create.Model, Input: input}
-	}
-	return input
 }
 
 // readInputDocument reads the JSON object --input names, and returns an empty

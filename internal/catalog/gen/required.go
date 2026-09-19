@@ -11,15 +11,15 @@ import (
 // kie.ai says in prose that some properties must be sent on every request
 // while leaving them out of the request body's required list. The two
 // statements disagree, and only the API can settle which one is right: asked
-// without the property, the suno endpoints below refuse the request and the
-// runway ones carry it out.
+// without such a property, some endpoints have refused the request and others
+// carried it out (#33).
 //
 // The prose is therefore read only to *detect* a disagreement. What to do
 // about each one is pinned in measured, with the request that decided it, and
 // a disagreement nobody has measured fails the generation instead of being
-// guessed at. That is the rule the category alias table in gen/llms already
-// follows, for the same reason: a table nothing forces anyone to update goes
-// stale in silence.
+// guessed at, for the same reason every other hand-kept table in the
+// generator fails loudly: a table nothing forces anyone to update goes stale
+// in silence.
 //
 // Guessing is refused because the two ways of being wrong are not symmetric.
 // A required property left optional surfaces as kie.ai's own 422, which costs
@@ -51,19 +51,11 @@ type modelProperty struct{ model, property string }
 // true where it refused it, false where it carried it out. Every entry is a
 // request that was really made, on the date given, because kie.ai may change
 // its answer -- and then this table is wrong rather than merely old.
-var measured = map[modelProperty]bool{
-	// HTTP 200 with code 422 "Please enter callBackUrl", no task created.
-	// #9 for generate-lyrics; #33, 2026-08-23, for both.
-	{"suno-api/generate-lyrics", "callBackUrl"}: true,
-	{"suno-api/cover-suno", "callBackUrl"}:      true,
-	// Accepted: both answered a request without callBackUrl with a taskId.
-	// extend-ai-video created a task that failed on its (deliberately
-	// invalid) parent id, and generate-ai-video produced a video and spent
-	// 12 credits, so neither endpoint enforces what its page states.
-	// #33, 2026-08-23.
-	{"runway-api/extend-ai-video", "callBackUrl"}:   false,
-	{"runway-api/generate-ai-video", "callBackUrl"}: false,
-}
+//
+// It is empty: the disagreements measured in #33 were all over callBackUrl,
+// which the Market endpoint takes beside the input rather than in it, so no
+// input schema states one any more.
+var measured = map[modelProperty]bool{}
 
 // MeasuredRequired reports what was measured for one property of one model:
 // whether kie.ai refused a request without it, and whether it was measured at

@@ -30,9 +30,19 @@ func describedSchema() map[string]any {
 	}
 }
 
+// pinMeasured hands one test a disagreement table of its own. The real one is
+// empty since the Market move (#51), so each outcome is only reachable this way.
+func pinMeasured(t *testing.T, table map[modelProperty]bool) {
+	t.Helper()
+	original := measured
+	measured = table
+	t.Cleanup(func() { measured = original })
+}
+
 func TestCorrectRequiredAddsWhatTheAPIRefusesWithout(t *testing.T) {
+	pinMeasured(t, map[modelProperty]bool{{"vendor/model", "callBackUrl"}: true})
 	schema := describedSchema()
-	if err := correctRequired("suno-api/generate-lyrics", schema); err != nil {
+	if err := correctRequired("vendor/model", schema); err != nil {
 		t.Fatalf("correctRequired: %v", err)
 	}
 	// callBackUrl is added because kie.ai refuses the request without it,
@@ -42,11 +52,12 @@ func TestCorrectRequiredAddsWhatTheAPIRefusesWithout(t *testing.T) {
 	}
 }
 
-// The page says the same thing for runway, and the API takes the request
-// anyway. Requiring it there would have the CLI refuse what kie.ai accepts.
+// A page may say the same thing of a model whose API takes the request anyway.
+// Requiring it there would have the CLI refuse what kie.ai accepts.
 func TestCorrectRequiredLeavesWhatTheAPIAccepts(t *testing.T) {
+	pinMeasured(t, map[modelProperty]bool{{"vendor/model", "callBackUrl"}: false})
 	schema := describedSchema()
-	if err := correctRequired("runway-api/generate-ai-video", schema); err != nil {
+	if err := correctRequired("vendor/model", schema); err != nil {
 		t.Fatalf("correctRequired: %v", err)
 	}
 	if got, want := schema["required"], []any{"prompt"}; !reflect.DeepEqual(got, want) {
@@ -58,12 +69,13 @@ func TestCorrectRequiredLeavesWhatTheAPIAccepts(t *testing.T) {
 // would be a decision the table is supposed to hold, so the crawl fails and
 // says what to measure.
 func TestCorrectRequiredFailsOnAnUnmeasuredDisagreement(t *testing.T) {
+	pinMeasured(t, map[modelProperty]bool{{"other/model", "callBackUrl"}: true})
 	schema := describedSchema()
-	err := correctRequired("suno-api/generate-music", schema)
+	err := correctRequired("vendor/model", schema)
 	if err == nil {
 		t.Fatal("want an error for a model with no measurement")
 	}
-	for _, want := range []string{"suno-api/generate-music", "callBackUrl", "required.go"} {
+	for _, want := range []string{"vendor/model", "callBackUrl", "required.go"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %v, want it to mention %q", err, want)
 		}
@@ -76,6 +88,7 @@ func TestCorrectRequiredFailsOnAnUnmeasuredDisagreement(t *testing.T) {
 // oneOf branches and array items hold properties of their own, and a page that
 // describes one of those as required disagrees just as loudly.
 func TestCorrectRequiredReachesNestedSchemas(t *testing.T) {
+	pinMeasured(t, map[modelProperty]bool{{"vendor/model", "callBackUrl"}: true})
 	nested := map[string]any{
 		"properties": map[string]any{
 			"shots": map[string]any{
@@ -89,7 +102,7 @@ func TestCorrectRequiredReachesNestedSchemas(t *testing.T) {
 			},
 		},
 	}
-	if err := correctRequired("suno-api/cover-suno", nested); err != nil {
+	if err := correctRequired("vendor/model", nested); err != nil {
 		t.Fatalf("correctRequired: %v", err)
 	}
 	shots := nested["properties"].(map[string]any)["shots"].(map[string]any)

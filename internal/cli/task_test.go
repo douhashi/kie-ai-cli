@@ -123,8 +123,9 @@ func TestTaskRunSubmitsAMarketModel(t *testing.T) {
 		t.Errorf("body = %s, want %s", canonical(t, stub.body), canonical(t, want))
 	}
 	// No callback is sent: this tool polls, and a URL nobody is listening
-	// on would have kie.ai retrying against nothing.
-	if input, _ := stub.body["input"].(map[string]any); input["callBackUrl"] != nil {
+	// on would have kie.ai retrying against nothing. The Market endpoint
+	// takes it beside the input.
+	if _, ok := stub.body["callBackUrl"]; ok {
 		t.Errorf("the body carries a callBackUrl: %s", canonical(t, stub.body))
 	}
 
@@ -135,44 +136,10 @@ func TestTaskRunSubmitsAMarketModel(t *testing.T) {
 	if task.Status != kie.StatusSubmitted {
 		t.Errorf("status = %q, want %q", task.Status, kie.StatusSubmitted)
 	}
-	// The ledger holds the input, not the envelope: a Market task and a
-	// standard-API task have to read the same way afterwards.
+	// The ledger holds the input, not the envelope: what the user gave is
+	// what reads back afterwards.
 	if canonical(t, task.Input) != canonical(t, wantInput) {
 		t.Errorf("input = %s, want %s", canonical(t, task.Input), canonical(t, wantInput))
-	}
-}
-
-// AC3: a standard API takes the input as the whole body and has a path of its
-// own, and is otherwise submitted and recorded exactly like a Market model.
-func TestTaskRunSubmitsAStandardAPI(t *testing.T) {
-	layout, stub := submitter(t)
-
-	// This model takes a callBackUrl because kie.ai refuses the request
-	// without one; the CLI never invents it (#33).
-	got := run(t, "task", "run", "suno-api/generate-lyrics",
-		"--prompt", "a song about rain", "--callBackUrl", "https://example.test/hook", "--json")
-	if got.code != 0 {
-		t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
-	}
-	var result struct {
-		TaskID string `json:"taskId"`
-	}
-	if err := json.Unmarshal([]byte(got.stdout), &result); err != nil {
-		t.Fatalf("stdout is not JSON (%v):\n%s", err, got.stdout)
-	}
-	if result.TaskID != submittedID {
-		t.Errorf("taskId = %q, want %q", result.TaskID, submittedID)
-	}
-
-	if stub.path != "/api/v1/lyrics" {
-		t.Errorf("path = %q, want the endpoint of this API", stub.path)
-	}
-	want := map[string]any{"prompt": "a song about rain", "callBackUrl": "https://example.test/hook"}
-	if canonical(t, stub.body) != canonical(t, want) {
-		t.Errorf("body = %s, want the input itself: %s", canonical(t, stub.body), canonical(t, want))
-	}
-	if task := recorded(t, layout, submittedID); canonical(t, task.Input) != canonical(t, want) {
-		t.Errorf("input = %s, want %s", canonical(t, task.Input), canonical(t, want))
 	}
 }
 
@@ -460,7 +427,7 @@ func TestTaskRunWantsTheModelIDFirst(t *testing.T) {
 		{name: "no model at all", args: []string{"task", "run"}},
 		{name: "a flag before the model", args: []string{"task", "run", "--prompt", "a cat", "qwen/text-to-image"}},
 		{name: "--json before the model", args: []string{"task", "run", "--json", "qwen/text-to-image"}},
-		{name: "a second model", args: []string{"task", "run", "qwen/text-to-image", "--prompt", "a cat", "suno-api/generate-lyrics"}},
+		{name: "a second model", args: []string{"task", "run", "qwen/text-to-image", "--prompt", "a cat", "ai-music-api/generate-lyrics"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

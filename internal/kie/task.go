@@ -8,9 +8,8 @@ import (
 
 // CreateTask submits one task to path and returns the id kie.ai gave it.
 //
-// The body differs by endpoint -- the Market endpoint wraps the input beside a
-// model name, a standard API takes the input itself -- so it is built by the
-// caller, which is the only place that knows which of the two this is.
+// The body is built by the caller, which is the only place that knows the
+// model it names.
 //
 // An answer this cannot read an id out of is a failure. The task has been
 // created and charged for by then, but an empty id travelling on would be

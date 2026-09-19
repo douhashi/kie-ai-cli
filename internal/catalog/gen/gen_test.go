@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,7 +47,6 @@ func fixturePages(t *testing.T) pages {
 		"market/claude/claude-opus-5",
 		"market/common/get-task-detail",
 		"suno-api/generate-music",
-		"suno-api/get-music-details",
 	} {
 		served["https://docs.kie.ai/"+path+".md"] = read(t, append([]string{"pages"}, strings.Split(path+".md", "/")...)...)
 	}
@@ -72,15 +72,15 @@ func TestBuildKeepsOnlyRunnableModels(t *testing.T) {
 	for _, model := range built.Models {
 		ids = append(ids, model.ID)
 	}
-	want := []string{"bytedance/seedream-v4-text-to-image", "suno-api/generate-music"}
-	if len(ids) != len(want) || ids[0] != want[0] || ids[1] != want[1] {
-		t.Fatalf("ids = %v, want %v (chat, and both query endpoints, must drop out)", ids, want)
+	want := []string{"ai-music-api/generate", "bytedance/seedream-v4-text-to-image"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("ids = %v, want %v (chat and the query endpoint must drop out)", ids, want)
 	}
 }
 
 func TestBuildMarketModel(t *testing.T) {
 	built := build(t, read(t, "llms.txt"), fixturePages(t))
-	model := built.Models[0]
+	model := built.Models[1]
 
 	if model.Name != "Seedream4.0 - Text to Image" {
 		t.Errorf("name = %q", model.Name)
@@ -94,7 +94,6 @@ func TestBuildMarketModel(t *testing.T) {
 	want := catalog.Create{
 		Method: "POST",
 		Path:   "/api/v1/jobs/createTask",
-		Style:  catalog.StyleMarket,
 		Model:  "bytedance/seedream-v4-text-to-image",
 	}
 	if model.Create != want {
@@ -111,23 +110,26 @@ func TestBuildMarketModel(t *testing.T) {
 	}
 }
 
-func TestBuildStandardModel(t *testing.T) {
+// Suno's pages moved to the Market endpoint with the model fixed by an example
+// alone, and their docs URLs stayed outside /market/. The id comes from the
+// request body, never from the URL.
+func TestBuildMarketModelFiledOutsideMarket(t *testing.T) {
 	built := build(t, read(t, "llms.txt"), fixturePages(t))
-	model := built.Models[1]
+	model := built.Models[0]
 
 	if model.Category != "music" || model.Vendor != "suno" {
 		t.Errorf("taxonomy = (%q, %q), want (music, suno)", model.Category, model.Vendor)
 	}
-	want := catalog.Create{Method: "POST", Path: "/api/v1/generate", Style: catalog.StyleDirect}
+	want := catalog.Create{Method: "POST", Path: "/api/v1/jobs/createTask", Model: "ai-music-api/generate"}
 	if model.Create != want {
 		t.Errorf("create = %+v, want %+v", model.Create, want)
 	}
-	if (model.Query != catalog.Query{Method: "GET", Path: "/api/v1/generate/record-info", Param: "taskId"}) {
+	if (model.Query != catalog.Query{Method: "GET", Path: "/api/v1/jobs/recordInfo", Param: "taskId"}) {
 		t.Errorf("query = %+v", model.Query)
 	}
 	props, _ := model.Input["properties"].(map[string]any)
-	if _, ok := props["customMode"]; !ok {
-		t.Errorf("input misses the request body properties: %v", model.Input)
+	if _, ok := props["custom_mode"]; !ok {
+		t.Errorf("input misses the model parameters: %v", model.Input)
 	}
 }
 
@@ -141,7 +143,7 @@ func TestBuildFillsEveryRequiredField(t *testing.T) {
 			t.Error("model with an empty id")
 		case model.Name == "", model.Category == "", model.Vendor == "", model.DocsURL == "":
 			t.Errorf("%s: empty descriptive field: %+v", model.ID, model)
-		case model.Create.Method == "", model.Create.Path == "", model.Create.Style == "":
+		case model.Create.Method == "", model.Create.Path == "", model.Create.Model == "":
 			t.Errorf("%s: incomplete create endpoint: %+v", model.ID, model.Create)
 		case model.Query.Method == "", model.Query.Path == "", model.Query.Param == "":
 			t.Errorf("%s: incomplete query endpoint: %+v", model.ID, model.Query)
@@ -188,10 +190,10 @@ func TestBuildRejectsUnexpectedInput(t *testing.T) {
 			served: fixturePages(t),
 			want:   "Kling API",
 		},
-		"standard page missing from the pair table": {
-			llms:   "## API Docs\n- Suno API > Music Generation [Future](https://docs.kie.ai/suno-api/not-in-the-table.md): x\n",
-			served: pages{"https://docs.kie.ai/suno-api/not-in-the-table.md": read(t, "pages", "suno-api", "generate-music.md")},
-			want:   "not-in-the-table",
+		"task page outside the Market endpoint": {
+			llms:   "## API Docs\n- Music Models > Suno [Future](https://docs.kie.ai/suno-api/future.md): x\n",
+			served: pages{"https://docs.kie.ai/suno-api/future.md": read(t, "broken", "not-market.md")},
+			want:   "/api/v1/generate",
 		},
 		"market page without its query endpoint": {
 			llms:   "## API Docs\n- Image Models > Seedream [Seedream](" + seedream + "): x\n",
@@ -199,7 +201,7 @@ func TestBuildRejectsUnexpectedInput(t *testing.T) {
 			want:   "market/common/get-task-detail",
 		},
 		"unparsable page": {
-			llms:   "## API Docs\n- Suno API > Music Generation [Generate Music](" + suno + "): x\n",
+			llms:   "## API Docs\n- Music Models > Suno [Generate Music](" + suno + "): x\n",
 			served: pages{suno: read(t, "broken", "no-yaml.md"), "https://docs.kie.ai/" + "market/common/get-task-detail.md": read(t, "pages", "market", "common", "get-task-detail.md")},
 			want:   "OpenAPI",
 		},

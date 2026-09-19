@@ -6,11 +6,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/douhashi/kie-ai-cli/internal/catalog"
 	"github.com/douhashi/kie-ai-cli/internal/cli"
 	"github.com/douhashi/kie-ai-cli/internal/config"
 	"github.com/douhashi/kie-ai-cli/internal/kie"
@@ -18,13 +20,11 @@ import (
 	"github.com/douhashi/kie-ai-cli/internal/paths"
 )
 
-// The models the listing tests use, one per query endpoint that matters here.
+// The models the listing tests use: one that produces files, and one that
+// answers with text and so produces none.
 const (
 	marketModel = "qwen/text-to-image"
-	lyricsModel = "suno-api/generate-lyrics"
-	// veoModel is queried through an endpoint this build has no decoder
-	// for, which is what makes it the unsupported case.
-	veoModel = "veo3-api/generate-veo-3-video"
+	lyricsModel = "ai-music-api/generate-lyrics"
 )
 
 // add records one task the way task run would have.
@@ -85,7 +85,12 @@ func stubQueries(t *testing.T, answers map[string]string) *queryStub {
 
 		s.mu.Lock()
 		s.inFlight--
-		body, ok := s.answers[r.URL.Path]
+		// An answer for one task wins over the answer for its endpoint,
+		// since every model is asked through the same one.
+		body, ok := s.answers[r.URL.Path+"?"+r.URL.RawQuery]
+		if !ok {
+			body, ok = s.answers[r.URL.Path]
+		}
 		s.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -290,16 +295,16 @@ func TestTaskListUnsavedNarrowsByStatusToo(t *testing.T) {
 	}
 }
 
-// AC1, AC3: the two kinds of endpoint are asked in the same way by the same
-// command, and what came back -- the state and the URLs -- is in the ledger
-// when it returns.
+// AC1, AC3: every unfinished task is asked about by the same command, and what
+// came back -- the state and the URLs -- is in the ledger when it returns.
 func TestTaskRefreshRecordsWhatKieSays(t *testing.T) {
 	layout := isolate(t)
 	t.Setenv(config.APIKeyEnv, secret)
 	stub := stubQueries(t, map[string]string{
-		"/api/v1/jobs/recordInfo": `{"code":200,"msg":"success","data":{"state":"success",
+		"/api/v1/jobs/recordInfo?taskId=task-1": `{"code":200,"msg":"success","data":{"state":"success",
 			"resultJson":"{\"resultUrls\":[\"https://file.kie.ai/a.jpg\"]}"}}`,
-		"/api/v1/lyrics/record-info": `{"code":200,"msg":"success","data":{"status":"SUCCESS"}}`,
+		"/api/v1/jobs/recordInfo?taskId=task-2": `{"code":200,"msg":"success","data":{"state":"success",
+			"resultJson":"{\"text\":\"[Verse]\"}"}}`,
 	})
 	add(t, layout, "task-1", marketModel, kie.StatusSubmitted)
 	add(t, layout, "task-2", lyricsModel, kie.StatusSubmitted)
@@ -325,14 +330,14 @@ func TestTaskRefreshRecordsWhatKieSays(t *testing.T) {
 	if len(market.ResultURLs) != 1 || market.ResultURLs[0] != "https://file.kie.ai/a.jpg" {
 		t.Errorf("resultUrls = %v, want the URL kie.ai answered with", market.ResultURLs)
 	}
-	// AC2 of the lyrics kind: an endpoint that answers with the text
-	// itself finishes with nothing to download, which is a success.
+	// AC2 of the lyrics kind: a task that answers with the text itself
+	// finishes with nothing to download, which is a success.
 	lyrics := recorded(t, layout, "task-2")
 	if lyrics.Status != kie.StatusSucceeded {
 		t.Errorf("the lyrics task is %q, want %q", lyrics.Status, kie.StatusSucceeded)
 	}
 	if len(lyrics.ResultURLs) != 0 {
-		t.Errorf("resultUrls = %v, want none for an endpoint that returns no files", lyrics.ResultURLs)
+		t.Errorf("resultUrls = %v, want none for a task that returns no files", lyrics.ResultURLs)
 	}
 	if !strings.Contains(got.stdout, "task-1") || !strings.Contains(got.stdout, "task-2") {
 		t.Errorf("refresh does not print what it found:\n%s", got.stdout)
@@ -369,13 +374,24 @@ func TestTaskRefreshRecordsWhyATaskFailed(t *testing.T) {
 // V4: an endpoint whose answers this build cannot read leaves the row exactly
 // as it was and says which task and which endpoint, so the task can be
 // collected once a decoder for it exists.
+//
+// Every model the generator writes is followed through the Market endpoint,
+// so the other one comes from a downloaded catalog.
 func TestTaskRefreshLeavesAnUnreadableEndpointAlone(t *testing.T) {
 	layout := isolate(t)
 	t.Setenv(config.APIKeyEnv, secret)
 	stub := stubQueries(t, map[string]string{
 		"/api/v1/jobs/recordInfo": `{"code":200,"msg":"success","data":{"state":"generating"}}`,
 	})
-	add(t, layout, "task-1", veoModel, kie.StatusSubmitted)
+	unreadable := publishedModel()
+	unreadable.Query.Path = "/api/v1/veo/record-info"
+	models := embedded(t).Models
+	i := slices.IndexFunc(models, func(m catalog.Model) bool { return m.ID == marketModel })
+	if i < 0 {
+		t.Fatalf("%s is not in the embedded catalog", marketModel)
+	}
+	downloadModels(t, layout, "2026-08-20", []catalog.Model{unreadable, models[i]})
+	add(t, layout, "task-1", newModelID, kie.StatusSubmitted)
 	add(t, layout, "task-2", marketModel, kie.StatusSubmitted)
 
 	got := run(t, "task", "refresh")

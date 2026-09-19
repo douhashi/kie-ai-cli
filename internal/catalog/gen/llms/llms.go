@@ -31,8 +31,7 @@ type Entry struct {
 }
 
 // DocsPath is the entry's URL without the site root and the .md suffix, e.g.
-// "suno-api/generate-music". It is stable enough to key tables on, and standard
-// API models use it as their id.
+// "suno-api/generate-music". It is stable enough to key tables on.
 func (e Entry) DocsPath() string {
 	return docsPath(e.URL)
 }
@@ -112,37 +111,21 @@ func splitBreadcrumb(s string) []string {
 	return levels
 }
 
-// categoryAliases pins the two first-level names that do not follow the
-// `<X> Models` shape kie.ai uses everywhere else. Both are its own omissions:
-// it already files Runway and 4o Image as `Video Models > Runway API` and
-// `Image Models > 4o Image API`, and `Music Models` exists. Anything else that
-// misses the shape fails the generation rather than growing this table by
-// accident.
-var categoryAliases = map[string]string{
-	"Suno API":   "music",
-	"Veo3.1 API": "video",
-}
-
 const modelsSuffix = " Models"
 
 // Taxonomy derives the category and vendor axes from a breadcrumb.
 //
 // The category is the first level with its ` Models` suffix dropped, and the
-// vendor is the second level; both are slugged. For the aliased first levels
-// there is no usable second level (Suno files by feature — `WAV Conversion` —
-// not by vendor), so the vendor comes from the first level instead.
+// vendor is the second level; both are slugged. A first level of any other
+// shape fails the generation rather than being guessed at.
 func Taxonomy(breadcrumb []string) (category, vendor string, err error) {
 	if len(breadcrumb) == 0 {
 		return "", "", fmt.Errorf("empty breadcrumb")
 	}
 	first := breadcrumb[0]
 
-	if category, ok := categoryAliases[first]; ok {
-		return category, slug(first), nil
-	}
 	if !strings.HasSuffix(first, modelsSuffix) {
-		return "", "", fmt.Errorf("unknown breadcrumb %q: expected %q or a name ending in %q",
-			first, "<name> Models", modelsSuffix)
+		return "", "", fmt.Errorf("unknown breadcrumb %q: expected a name ending in %q", first, modelsSuffix)
 	}
 	if len(breadcrumb) < 2 {
 		return "", "", fmt.Errorf("breadcrumb %q has no vendor level", first)

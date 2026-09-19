@@ -24,9 +24,9 @@ const (
 	lyricsPrompt = "a short song about a paper boat, kie-ai-cli e2e"
 )
 
-// V1, V2: a Market task and a task on an API of its own are followed to the
-// end by the same command, and what kie.ai said about each -- the state and
-// what it produced -- is in the ledger when it returns.
+// V1, V2: a task that produces files and one that answers with text are
+// followed to the end by the same command, and what kie.ai said about each --
+// the state and what it produced -- is in the ledger when it returns.
 //
 // Every run spends real credits on two tasks kie.ai has no way to cancel, so
 // the two models are one test and each is given the one required field.
@@ -37,11 +37,8 @@ func TestTaskRefreshFollowsRealTasksToTheEnd(t *testing.T) {
 	layout := isolate(t)
 	t.Setenv(config.APIKeyEnv, key)
 
-	// The lyrics endpoint refuses a submission without a callBackUrl, which
-	// only the live API says; see TestTaskRunSubmitsToTheRealAPI.
-	market := submit(t, "qwen/text-to-image", "--prompt", imagePrompt)
-	lyrics := submit(t, lyricsModel, "--prompt", lyricsPrompt,
-		"--callBackUrl", "https://example.com/kie-ai-cli-e2e")
+	market := submit(t, marketModel, "--prompt", imagePrompt)
+	lyrics := submit(t, lyricsModel, "--prompt", lyricsPrompt)
 
 	listed := follow(t, key)
 	for _, taskID := range []string{market, lyrics} {
@@ -53,16 +50,16 @@ func TestTaskRefreshFollowsRealTasksToTheEnd(t *testing.T) {
 			t.Errorf("%s is %q (%s), want %q", taskID, state.Status, state.Error, kie.StatusSucceeded)
 		}
 	}
-	// The Market endpoint answers with the files it made; the lyrics
-	// endpoint answers with the words themselves, so a success there has
-	// nothing to download and an empty list is the right record of it.
+	// The image task answers with the files it made; the lyrics task
+	// answers with the words themselves, so a success there has nothing to
+	// download and an empty list is the right record of it.
 	if urls := recorded(t, layout, market).ResultURLs; len(urls) == 0 {
 		t.Error("the Market task succeeded with no result URL recorded")
 	} else {
 		t.Logf("market result: %v", urls)
 	}
 	if urls := recorded(t, layout, lyrics).ResultURLs; len(urls) != 0 {
-		t.Errorf("the lyrics task recorded %v, want no URLs from an endpoint that returns none", urls)
+		t.Errorf("the lyrics task recorded %v, want no URLs from a task that returns none", urls)
 	}
 
 	t.Logf("credits after: %s", balance(t, key))
@@ -89,26 +86,6 @@ func TestTaskRefreshReportsATaskTheRealAPIDoesNotKnow(t *testing.T) {
 		t.Errorf("status = %q, want the row left as it was", task.Status)
 	}
 	t.Logf("kie task refresh on an unknown task -> code %d, stderr %q", got.code, strings.TrimRight(got.stderr, "\n"))
-}
-
-// V4: an endpoint this build has no decoder for is refused without asking, so
-// a model outside the three supported query paths costs nothing to find out
-// about and leaves its row alone.
-func TestTaskRefreshRefusesAnUnreadableEndpointAgainstTheRealAPI(t *testing.T) {
-	key := realKey(t)
-	layout := isolate(t)
-	t.Setenv(config.APIKeyEnv, key)
-	const unread = "task-kie-ai-cli-e2e-unreadable"
-	add(t, layout, unread, veoModel, kie.StatusSubmitted)
-
-	got := run(t, "task", "refresh")
-	if got.code != 1 {
-		t.Errorf("code = %d, want 1 (stderr %q)", got.code, got.stderr)
-	}
-	if !strings.Contains(got.stderr, "/api/v1/veo/record-info") {
-		t.Errorf("stderr does not name the endpoint that cannot be read:\n%s", got.stderr)
-	}
-	t.Logf("kie task refresh on an unsupported endpoint -> code %d, stderr %q", got.code, strings.TrimRight(got.stderr, "\n"))
 }
 
 // submit runs one task and returns the id kie.ai gave it.
