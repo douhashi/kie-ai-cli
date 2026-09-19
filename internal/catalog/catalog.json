@@ -4107,7 +4107,8 @@
           }
         },
         "required": [
-          "text"
+          "text",
+          "voice"
         ],
         "type": "object"
       }
