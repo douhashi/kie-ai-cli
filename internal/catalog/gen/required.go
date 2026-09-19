@@ -52,10 +52,24 @@ type modelProperty struct{ model, property string }
 // request that was really made, on the date given, because kie.ai may change
 // its answer -- and then this table is wrong rather than merely old.
 //
-// It is empty: the disagreements measured in #33 were all over callBackUrl,
-// which the Market endpoint takes beside the input rather than in it, so no
-// input schema states one any more.
-var measured = map[modelProperty]bool{}
+// The answer is the authority in both directions, whatever the description
+// says: true adds the property to a required list that leaves it out, and
+// false takes it off one that lists it, since upstream over-requires as well
+// as under-requires (#69).
+//
+// Each entry holds for every request, so a property required only for some
+// value of another one cannot be written here; the pre-submit check has no way
+// to say "required when" either. Such a property stays optional, and kie.ai's
+// own 422 names it when it is missing.
+var measured = map[modelProperty]bool{
+	// Listed as required at the root, but only type split_stem_advanced uses
+	// it. Sent with type separate_vocal and no stem_name, the request was
+	// taken and the task reached SUCCESS for 10 credits. With type
+	// split_stem_advanced and no stem_name it answered 422 "stemName cannot be
+	// empty when type is split-stem-advanced." and created no task: that
+	// condition is left to kie.ai, per the comment above. #69, 2026-09-20.
+	{"ai-music-api/separate-vocals", "stem_name"}: false,
+}
 
 // MeasuredRequired reports what was measured for one property of one model:
 // whether kie.ai refused a request without it, and whether it was measured at
@@ -235,10 +249,16 @@ func applyMeasuredInputRequired(model string, input map[string]any) error {
 }
 
 // correctObject walks one object schema and the schemas below it, which is
-// where a property nested in an array item or a oneOf branch is reached.
+// where a property nested in an array item or a oneOf branch is reached. It
+// takes off the required list what kie.ai was measured to do without, and adds
+// what a description calls for and kie.ai was measured to refuse without.
 func correctObject(model string, schema map[string]any, unmeasured *[]string) {
 	properties, _ := schema["properties"].(map[string]any)
 	listed := requiredNames(schema)
+	kept := slices.DeleteFunc(slices.Clone(listed), func(name string) bool {
+		required, pinned := MeasuredRequired(model, name)
+		return pinned && !required
+	})
 	var add []string
 	for name, raw := range properties {
 		property, ok := raw.(map[string]any)
@@ -257,8 +277,14 @@ func correctObject(model string, schema map[string]any, unmeasured *[]string) {
 			add = append(add, name)
 		}
 	}
-	if len(add) > 0 {
-		schema["required"] = sortedRequired(append(listed, add...))
+	// Nothing changed leaves the list byte-identical, and nothing left drops
+	// it, since an empty list says the same as none.
+	switch {
+	case len(add) == 0 && len(kept) == len(listed):
+	case len(add) == 0 && len(kept) == 0:
+		delete(schema, "required")
+	default:
+		schema["required"] = sortedRequired(append(kept, add...))
 	}
 	for _, keyword := range []string{"oneOf", "anyOf", "allOf"} {
 		members, _ := schema[keyword].([]any)
