@@ -61,13 +61,11 @@ jobs:
 
       # GITHUB_TOKEN が作った PR には CI が走らない。差分があった日の検査は
       # ここで通し、結果は PR 本文に残す（レビューが検査結果無しで届かないようにする）。
-      - name: Lint
+      # PR の CI と同じフルチェックを通す。カタログの差分は焼き込みにも効くので、
+      # 3 OS 分のビルドと焼き込みの検査（build-all）まで含める。
+      - name: Full check
         if: steps.diff.outputs.changed == 'true'
-        run: mise run lint
-
-      - name: Test
-        if: steps.diff.outputs.changed == 'true'
-        run: mise run test
+        run: mise run check
 
       - name: Open pull request
         if: steps.diff.outputs.changed == 'true'
@@ -96,8 +94,7 @@ jobs:
 
           \`GITHUB_TOKEN\` が作った PR には CI が走らないため、検査は生成と同じジョブで通してある。
 
-          - \`mise run lint\`: 成功
-          - \`mise run test\`: 成功
+          - \`mise run check\`: 成功
           - run: $RUN_URL
 
           ## required を持たない未実測のモデル

@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,9 @@ EXEMPT_DIR_NAMES = {"document_system"}
 
 # roadmap の見出しとして許す形。機能軸のグルーピングを作らせない。
 ROADMAP_TOP_HEADINGS = {"## 予定（上から着手順）", "## 完了"}
+
+# roadmap の項目が対応する課題。独自の ID は振らない。未起票の項目は持たない。
+ROADMAP_ISSUE_REF = re.compile(r" → #(\d+)$")
 
 
 @dataclass
@@ -109,7 +113,7 @@ def check_roadmap(path: Path) -> list[Violation]:
     """
     out: list[Violation] = []
     lines = path.read_text(encoding="utf-8").splitlines()
-    ids: list[str] = []
+    issues: list[str] = []
 
     for i, line in enumerate(lines, start=1):
         if (n := _too_long(line)) is not None:
@@ -120,10 +124,8 @@ def check_roadmap(path: Path) -> list[Violation]:
                 out.append(Violation(path, i, "状態は [x] / [ ] / [~] のいずれか"))
             if line.startswith("- [x]") and "[dep " in line:
                 out.append(Violation(path, i, "完了項目に [dep …] を残さない"))
-            if (start := line.find("**")) != -1 and (end := line.find("**", start + 2)) != -1:
-                ids.append(line[start + 2 : end])
-            else:
-                out.append(Violation(path, i, "項目 ID（**<ID>**）が無い"))
+            if (m := ROADMAP_ISSUE_REF.search(line)) is not None:
+                issues.append(m.group(1))
             continue
 
         if line.startswith("  ") and line.strip().startswith("- "):
@@ -139,8 +141,8 @@ def check_roadmap(path: Path) -> list[Violation]:
             if not ok:
                 out.append(Violation(path, i, "`### ` 見出しは時間軸（YYYY-MM）のみ"))
 
-    for name in sorted({x for x in ids if ids.count(x) > 1}):
-        out.append(Violation(path, 0, f"項目 ID `{name}` が重複している"))
+    for num in sorted({x for x in issues if issues.count(x) > 1}, key=int):
+        out.append(Violation(path, 0, f"課題番号 #{num} が重複している"))
 
     return out
 

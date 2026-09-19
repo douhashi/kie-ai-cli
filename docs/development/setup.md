@@ -89,11 +89,13 @@ byte 比較で落とす。索引だけが消えた場合は、カタログが変
 | タスク | 内容 |
 |---|---|
 | `mise run setup` | git hooks の導入 |
-| `mise run lint` | ドキュメントの書式契約と Go の静的検査 |
+| `mise run lint:docs` | ドキュメントの書式契約の検査 |
+| `mise run lint:go` | Go の静的検査 |
 | `mise run test` | Go のテスト（cgo 無し・`e2e` タグを除く） |
 | `mise run catalog` | docs.kie.ai を巡回してカタログを再生成する |
 | `mise run build` | 手元向けの単一バイナリを `dist/` に作る |
 | `mise run build-all` | 配布対象の 3 OS 向けにクロスビルドし、成果物を検査してチェックサムを作る |
+| `mise run check` | フルチェック（`lint:docs`・`lint:go`・`test`・`build-all` を束ねる） |
 
 `mise run build-all` はカタログと索引の**それぞれ 1 行**が成果物の中に現れることを
 確認する。両者は別の embed なので、片方だけが抜けても他方の検査は通ってしまう。
@@ -106,12 +108,12 @@ Go ツールチェーンが記録した版を返す）。
 
 ## 何が検査されるか
 
-`mise run lint` が次を通す。放置すると必ず膨らむものと、機械が答えを持つものだけを見る。
+`mise run lint:docs` と `mise run lint:go` が次を通す。放置すると必ず膨らむものと、機械が答えを持つものだけを見る。
 
 | 対象 | 主な検査 |
 |---|---|
 | 各 `INDEX.md` | 1 行の上限／エントリ書式／補足ラベルの固定／**エントリ名 ⇔ 実在ファイルの双方向一致**／散文の禁止 |
-| `roadmap.md` | 1 行の上限／**入れ子の禁止**／完了項目に依存を残さない／ID 重複なし／見出しの制限 |
+| `roadmap.md` | 1 行の上限／**入れ子の禁止**／完了項目に依存を残さない／課題番号の重複なし／見出しの制限 |
 | Go のコード | `gofmt` 未適用のファイルが無いこと／`go vet ./...` |
 
 `mise run test` は `internal/catalog/catalog.json` そのものも検査する。生成器が
@@ -123,7 +125,7 @@ Go ツールチェーンが記録した版を返す）。
 `.tmp/spira-evidence/timing.py` のように手元で回す（CI の時計は負荷を測る）。
 
 pre-commit フックが走らせるのは `scripts/check-docs-format.py` だけである。
-Go の検査はツールチェーンを要してフックには重いので、`mise run lint` と CI に置く。
+Go の検査はツールチェーンを要してフックには重いので、`mise run lint:go` と CI に置く。
 
 書式の定義は [`../document_system/templates/`](../document_system/templates/) にある。
 
@@ -132,13 +134,16 @@ Go の検査はツールチェーンを要してフックには重いので、`m
 
 ## CI
 
-CI は PR で 2 つのジョブを回す。どちらも `mise install` の後に mise タスクを呼ぶだけで、
-検査の中身は `mise.toml` を SSoT とする（CI 側で二重定義しない）。
+CI は PR の変更範囲で実行内容を分ける。どちらも `mise install` の後に mise タスクを
+呼ぶだけで、検査の中身は `mise.toml` を SSoT とする（CI 側で二重定義しない）。
 
-| ジョブ | 内容 |
+| 変更範囲 | 実行 |
 |---|---|
-| `check` | `mise run lint` と `mise run test` |
-| `build` | `mise run build-all`。3 OS 分が壊れていないことを PR の時点で落とす |
+| `docs/` 配下のみ | `mise run lint:docs`（書式契約だけ） |
+| それ以外を含む | `mise run check`（3 OS 分のビルドまで含むフルチェック） |
+
+検査を足すときは `mise.toml` の `[tasks.check]` の `depends` に加える。CI は変えない。
+必須ステータスチェックには、どちらの分岐でも結果を返す `result` ジョブを指定する。
 
 書式契約もビルドの前提も、レビューの目視ではなく **機械的に落とす**
 （規約を文章で定めるだけでは守られない）。
@@ -150,8 +155,8 @@ PR の検査とは別に、カタログの追従を 2 つのワークフロー�
 | `catalog-refresh` | 日次（03:27 JST）と手動で `mise run catalog` を回し、差分があれば `catalog-refresh` ブランチへ force push して PR を出す |
 | `catalog-publish` | main の `catalog.json` / `generated_at.txt` 更新を tag `catalog` の Release 資産 2 件へ上げる |
 
-差分が無い日は PR を作らない。差分があった日は同じジョブで `mise run lint` と
-`mise run test` まで通してから PR を出す。`GITHUB_TOKEN` が作った PR には CI が
+差分が無い日は PR を作らない。差分があった日は同じジョブで `mise run check` まで
+通してから PR を出す。`GITHUB_TOKEN` が作った PR には CI が
 走らないので、検査結果は PR 本文に残す。既に open な PR があればブランチと本文の
 更新に留め、PR を積み上げない。本文の「required を持たない未実測のモデル」は
 その日の巡回の結果なので、**既存 PR でも本文を作り直す**。
