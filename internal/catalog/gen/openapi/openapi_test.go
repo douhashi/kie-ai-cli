@@ -67,9 +67,9 @@ func TestParseResolvesMarketModelAndInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RequestProperty(model): %v", err)
 	}
-	id, err := openapi.SingleEnumString(modelProp)
+	id, err := openapi.FixedString(modelProp)
 	if err != nil {
-		t.Fatalf("SingleEnumString: %v", err)
+		t.Fatalf("FixedString: %v", err)
 	}
 	if id != "bytedance/seedream-v4-text-to-image" {
 		t.Errorf("model = %q", id)
@@ -137,24 +137,6 @@ func TestParseMarketQueryPage(t *testing.T) {
 	}
 }
 
-func TestParseStandardCreatePage(t *testing.T) {
-	op := parseFixture(t, "pages", "suno-api", "generate-music.md")
-
-	if op.Method != "POST" || op.Path != "/api/v1/generate" {
-		t.Errorf("got %s %s", op.Method, op.Path)
-	}
-	if !op.ReturnsTaskID {
-		t.Error("ReturnsTaskID = false, want true")
-	}
-	props, ok := op.RequestSchema["properties"].(map[string]any)
-	if !ok {
-		t.Fatalf("request schema has no properties: %v", op.RequestSchema)
-	}
-	if _, ok := props["customMode"]; !ok {
-		t.Errorf("customMode missing from %v", props)
-	}
-}
-
 // Chat models answer synchronously, so nothing about them can be tracked in the
 // task ledger. The test asserts the shape is what excludes them, not the name.
 func TestParseDetectsSynchronousEndpoint(t *testing.T) {
@@ -187,22 +169,85 @@ func TestParseRejectsUnexpectedPages(t *testing.T) {
 	}
 }
 
-func TestSingleEnumStringRejectsAmbiguousEnum(t *testing.T) {
+func TestFixedStringRejectsAmbiguousEnum(t *testing.T) {
 	op := parseFixture(t, "broken", "two-models.md")
 
 	modelProp, err := op.RequestProperty("model")
 	if err != nil {
 		t.Fatalf("RequestProperty(model): %v", err)
 	}
-	if _, err := openapi.SingleEnumString(modelProp); err == nil {
+	if _, err := openapi.FixedString(modelProp); err == nil {
 		t.Fatal("want error when the model enum holds more than one value")
 	}
 }
 
-func TestRequestPropertyRejectsMissingProperty(t *testing.T) {
-	op := parseFixture(t, "pages", "suno-api", "generate-music.md")
+// kie.ai states a model's fixed value in whichever of enum, default and
+// examples the page's author reached for, so each shape it takes counts.
+func TestFixedStringReadsEveryShapeAPageStatesItIn(t *testing.T) {
+	tests := map[string]map[string]any{
+		"enum":                {"enum": []any{"vendor/model"}, "default": "vendor/model"},
+		"default and example": {"default": "vendor/model", "examples": []any{"vendor/model"}},
+		"examples only":       {"examples": []any{"vendor/model"}},
+		"default only":        {"default": "vendor/model"},
+	}
+	for name, schema := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := openapi.FixedString(schema)
+			if err != nil {
+				t.Fatalf("FixedString: %v", err)
+			}
+			if got != "vendor/model" {
+				t.Errorf("FixedString = %q, want vendor/model", got)
+			}
+		})
+	}
+}
 
-	if _, err := op.RequestProperty("input"); err == nil {
+// A page that names two values has not fixed one, and picking either would
+// send some model's requests to another.
+func TestFixedStringRejectsWhatDoesNotFixOneValue(t *testing.T) {
+	tests := map[string]struct {
+		schema map[string]any
+		want   string
+	}{
+		"several enum values": {
+			schema: map[string]any{"enum": []any{"vendor/a", "vendor/b"}},
+			want:   "enum has 2 values",
+		},
+		"default and example disagree": {
+			schema: map[string]any{"default": "vendor/a", "examples": []any{"vendor/b"}},
+			want:   "disagree",
+		},
+		"examples disagree": {
+			schema: map[string]any{"examples": []any{"vendor/a", "vendor/b"}},
+			want:   "disagree",
+		},
+		"nothing stated": {
+			schema: map[string]any{"type": "string"},
+			want:   "no enum, default or examples",
+		},
+		"not a string": {
+			schema: map[string]any{"default": 3},
+			want:   "not a string",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := openapi.FixedString(tt.schema)
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRequestPropertyRejectsMissingProperty(t *testing.T) {
+	op := parseFixture(t, "pages", "market", "seedream", "seedream-v4-text-to-image.md")
+
+	if _, err := op.RequestProperty("no_such_property"); err == nil {
 		t.Fatal("want error for a property the request body does not have")
 	}
 }

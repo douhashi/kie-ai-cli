@@ -47,7 +47,7 @@ func TestCommittedCatalogIsComplete(t *testing.T) {
 			"docsUrl":       model.DocsURL,
 			"create.method": model.Create.Method,
 			"create.path":   model.Create.Path,
-			"create.style":  string(model.Create.Style),
+			"create.model":  model.Create.Model,
 			"query.method":  model.Query.Method,
 			"query.path":    model.Query.Path,
 			"query.param":   model.Query.Param,
@@ -77,21 +77,16 @@ func TestCommittedCatalogHasUniqueSortedIDs(t *testing.T) {
 	}
 }
 
-// The style decides how the CLI builds the request, so an unknown one would
-// leave the model unrunnable.
-func TestCommittedCatalogStylesAgreeWithTheirModelField(t *testing.T) {
+// Every model is created through the one Market endpoint, which tells them
+// apart by the model value alone; a model posting anything else would reach
+// some other model, or none.
+func TestCommittedCatalogCreatesEveryModelThroughMarket(t *testing.T) {
 	for _, model := range committed(t).Models {
-		switch model.Create.Style {
-		case catalog.StyleMarket:
-			if model.Create.Model == "" {
-				t.Errorf("%s: a Market create needs the model value to post", model.ID)
-			}
-		case catalog.StyleDirect:
-			if model.Create.Model != "" {
-				t.Errorf("%s: a direct create posts to its own path and takes no model value", model.ID)
-			}
-		default:
-			t.Errorf("%s: unknown create style %q", model.ID, model.Create.Style)
+		if model.Create.Path != "/api/v1/jobs/createTask" {
+			t.Errorf("%s: creates through %s, not the Market endpoint", model.ID, model.Create.Path)
+		}
+		if model.Create.Model != model.ID {
+			t.Errorf("%s: posts the model value %q, not its own id", model.ID, model.Create.Model)
 		}
 	}
 }
@@ -293,15 +288,13 @@ func walkObjects(schema map[string]any, visit func(properties map[string]any, re
 // every model, either the corrected required list or the measurement saying
 // the endpoint takes the request without it.
 func TestCommittedCatalogAgreesWithTheMeasuredRequirements(t *testing.T) {
-	// The four disagreements known when this was written, and the verdict
-	// measured for each. Listing them also keeps the test from passing
-	// because the walk stopped reaching anything.
+	// Properties carrying the wording when this was written (#51). Listing
+	// them keeps the test from passing because the walk stopped reaching
+	// anything; the page itself lists each of them as required.
 	seen := map[string]bool{}
-	want := map[string]bool{
-		"suno-api/generate-lyrics.callBackUrl":     true,
-		"suno-api/cover-suno.callBackUrl":          true,
-		"runway-api/extend-ai-video.callBackUrl":   false,
-		"runway-api/generate-ai-video.callBackUrl": false,
+	want := []string{
+		"ai-music-api/extend.audio_id",
+		"veo-3-1.prompt",
 	}
 	for _, model := range committed(t).Models {
 		walkObjects(model.Input, func(properties map[string]any, required map[string]bool) {
@@ -316,12 +309,7 @@ func TestCommittedCatalogAgreesWithTheMeasuredRequirements(t *testing.T) {
 				}
 				measured, pinned := gen.MeasuredRequired(model.ID, name)
 				path := model.ID + "." + name
-				if _, known := want[path]; known {
-					seen[path] = true
-					if pinned && measured != want[path] {
-						t.Errorf("%s: measured as required=%v, want %v", path, measured, want[path])
-					}
-				}
+				seen[path] = true
 				// Where a request was made, its answer is the authority
 				// in both directions: the field is required exactly when
 				// kie.ai refused to do without it.
@@ -338,7 +326,7 @@ func TestCommittedCatalogAgreesWithTheMeasuredRequirements(t *testing.T) {
 			}
 		})
 	}
-	for path := range want {
+	for _, path := range want {
 		if !seen[path] {
 			t.Errorf("%s no longer carries the description the correction reads; the walk is not reaching it", path)
 		}
@@ -350,11 +338,11 @@ func TestCommittedCatalogAgreesWithTheMeasuredRequirements(t *testing.T) {
 // optional, or `task run` would refuse a request kie.ai accepts.
 func TestCommittedCatalogLeavesConditionallyRequiredPropertiesOptional(t *testing.T) {
 	conditional := map[string][]string{
-		"suno-api/generate-music":                 {"style", "title"},
-		"suno-api/extend-music":                   {"continueAt", "prompt", "style", "title"},
-		"suno-api/upload-and-cover-audio":         {"style", "title"},
-		"flux-kontext-api/generate-or-edit-image": {"inputImage"},
-		"4o-image-api/generate-4-o-image":         {"prompt"},
+		"ai-music-api/generate":               {"style", "title"},
+		"ai-music-api/extend":                 {"continue_at", "prompt", "style", "title"},
+		"ai-music-api/upload-and-cover-audio": {"style", "title"},
+		"flux1-kontext":                       {"input_image"},
+		"4o-image-api":                        {"prompt"},
 	}
 	byID := map[string]catalog.Model{}
 	for _, model := range committed(t).Models {

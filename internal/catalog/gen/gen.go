@@ -96,7 +96,7 @@ func buildModel(entry llms.Entry, operation *openapi.Operation, operations map[s
 		return catalog.Model{}, err
 	}
 
-	id, input, queryPath, err := creation(entry, operation)
+	id, input, err := creation(entry, operation)
 	if err != nil {
 		return catalog.Model{}, err
 	}
@@ -106,7 +106,7 @@ func buildModel(entry llms.Entry, operation *openapi.Operation, operations map[s
 	if err := correctRequired(id, input); err != nil {
 		return catalog.Model{}, err
 	}
-	query, err := queryEndpoint(queryPath, operations)
+	query, err := queryEndpoint(pairs.MarketQuery, operations)
 	if err != nil {
 		return catalog.Model{}, err
 	}
@@ -114,11 +114,6 @@ func buildModel(entry llms.Entry, operation *openapi.Operation, operations map[s
 		return catalog.Model{}, fmt.Errorf("operation has no summary to name the model with")
 	}
 
-	style := catalog.StyleDirect
-	marketModel := ""
-	if operation.Path == pairs.MarketCreatePath {
-		style, marketModel = catalog.StyleMarket, id
-	}
 	// llms.txt copies the first line of the page, which is often a heading, so
 	// it only helps when it happens to be prose.
 	description := operation.Description
@@ -136,50 +131,43 @@ func buildModel(entry llms.Entry, operation *openapi.Operation, operations map[s
 		Create: catalog.Create{
 			Method: operation.Method,
 			Path:   operation.Path,
-			Style:  style,
-			Model:  marketModel,
+			Model:  id,
 		},
 		Query: query,
 		Input: input,
 	}, nil
 }
 
-// creation derives the model id, the schema of what the user supplies, and the
-// page documenting how to follow the task.
+// creation derives the model id and the schema of what the user supplies.
 //
-// Market models are told apart by the endpoint they post to, not by their docs
-// URL: a handful of them are filed outside /market/.
-func creation(entry llms.Entry, operation *openapi.Operation) (id string, input map[string]any, queryPath string, err error) {
-	if operation.Path == pairs.MarketCreatePath {
-		modelProperty, err := operation.RequestProperty("model")
-		if err != nil {
-			return "", nil, "", err
-		}
-		id, err = openapi.SingleEnumString(modelProperty)
-		if err != nil {
-			return "", nil, "", fmt.Errorf("model property: %w", err)
-		}
-		if pairs.ClaimsForeignID(entry.DocsPath(), id) {
-			return "", nil, "", errForeignID
-		}
-		// Everything outside "input" is envelope the CLI fills in itself.
-		input, err = operation.RequestProperty("input")
-		if err != nil {
-			return "", nil, "", err
-		}
-		return id, input, pairs.MarketQuery, nil
+// Every task kie.ai documents is created through the Market endpoint, and a
+// page is told apart by the endpoint it posts to, not by its docs URL: Suno,
+// Veo3.1, Runway, 4o Image and Flux Kontext are filed outside /market/. A task
+// page posting anywhere else has nothing to poll it with, so it fails the
+// generation rather than being guessed at.
+func creation(entry llms.Entry, operation *openapi.Operation) (id string, input map[string]any, err error) {
+	if operation.Path != pairs.MarketCreatePath {
+		return "", nil, fmt.Errorf(
+			"page returns a task id from %s %s, not from the Market endpoint %s; the generator knows no other way to follow a task",
+			operation.Method, operation.Path, pairs.MarketCreatePath)
 	}
-
-	id = entry.DocsPath()
-	queryPath, ok := pairs.Query(id)
-	if !ok {
-		return "", nil, "", fmt.Errorf(
-			"page returns a task id but no query endpoint is paired with it; add %s to internal/catalog/gen/pairs", id)
+	modelProperty, err := operation.RequestProperty("model")
+	if err != nil {
+		return "", nil, err
 	}
-	if operation.RequestSchema == nil {
-		return "", nil, "", fmt.Errorf("create endpoint has no application/json request body")
+	id, err = openapi.FixedString(modelProperty)
+	if err != nil {
+		return "", nil, fmt.Errorf("model property: %w", err)
 	}
-	return id, operation.RequestSchema, queryPath, nil
+	if pairs.ClaimsForeignID(entry.DocsPath(), id) {
+		return "", nil, errForeignID
+	}
+	// Everything outside "input" is envelope the CLI fills in itself.
+	input, err = operation.RequestProperty("input")
+	if err != nil {
+		return "", nil, err
+	}
+	return id, input, nil
 }
 
 func queryEndpoint(docsPath string, operations map[string]*openapi.Operation) (catalog.Query, error) {

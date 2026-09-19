@@ -209,14 +209,12 @@ func TestRunIsReproducible(t *testing.T) {
 	files := map[string]string{
 		"/market/seedream/seedream-v4-text-to-image.md": fixture(t, "pages", "market", "seedream", "seedream-v4-text-to-image.md"),
 		"/suno-api/generate-music.md":                   fixture(t, "pages", "suno-api", "generate-music.md"),
-		"/suno-api/get-music-details.md":                fixture(t, "pages", "suno-api", "get-music-details.md"),
 		"/market/common/get-task-detail.md":             fixture(t, "pages", "market", "common", "get-task-detail.md"),
 	}
 	base := site(t, files)
 	files["/llms.txt"] = index(base, map[string]string{
 		"market/seedream/seedream-v4-text-to-image": "Image Models > Seedream",
-		"suno-api/generate-music":                   "Suno API > Music Generation",
-		"suno-api/get-music-details":                "Suno API > Music Generation",
+		"suno-api/generate-music":                   "Music Models > Suno > Music Generation",
 		"market/common/get-task-detail":             "",
 	})
 

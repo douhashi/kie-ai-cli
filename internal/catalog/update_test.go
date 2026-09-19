@@ -33,7 +33,7 @@ func oneModel() []Model {
 	return []Model{{
 		ID: theirID, Name: "Published Since", Category: "image", Vendor: "acme",
 		DocsURL: "https://docs.kie.ai/acme",
-		Create:  Create{Method: "POST", Path: "/api/v1/jobs", Style: StyleMarket, Model: theirID},
+		Create:  Create{Method: "POST", Path: "/api/v1/jobs", Model: theirID},
 		Query:   Query{Method: "GET", Path: "/api/v1/jobs", Param: "taskId"},
 		Input:   map[string]any{"type": "object"},
 	}}

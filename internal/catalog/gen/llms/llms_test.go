@@ -33,7 +33,6 @@ func TestParseAPIDocsKeepsOnlyEnglishAPIDocs(t *testing.T) {
 		"market/seedream/seedream-v4-text-to-image",
 		"market/claude/claude-opus-5",
 		"suno-api/generate-music",
-		"suno-api/get-music-details",
 		"market/common/get-task-detail",
 	}
 	if !reflect.DeepEqual(paths, want) {
@@ -100,8 +99,8 @@ func TestTaxonomy(t *testing.T) {
 		{"multi word vendor", []string{"Image Models", "Grok Imagine"}, "image", "grok-imagine"},
 		{"vendor api suffix", []string{"Image Models", "4o Image API"}, "image", "4o-image"},
 		{"third level ignored", []string{"Video Models", "Runway API", "Aleph"}, "video", "runway"},
-		{"suno alias", []string{"Suno API", "WAV Conversion"}, "music", "suno"},
-		{"veo alias", []string{"Veo3.1 API"}, "video", "veo3.1"},
+		{"feature level ignored", []string{"Music Models", "Suno", "WAV Conversion"}, "music", "suno"},
+		{"dotted vendor", []string{"Video Models", "Veo3.1 API"}, "video", "veo3.1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -119,9 +118,12 @@ func TestTaxonomy(t *testing.T) {
 func TestTaxonomyRejectsUnknownBreadcrumb(t *testing.T) {
 	tests := map[string][]string{
 		"unknown api suffix": {"Kling API", "Kling"},
-		"no suffix":          {"Something", "Else"},
-		"missing vendor":     {"Image Models"},
-		"empty":              nil,
+		// Suno and Veo3.1 were filed like this before moving to Market (#51).
+		"former suno level": {"Suno API", "WAV Conversion"},
+		"former veo level":  {"Veo3.1 API"},
+		"no suffix":         {"Something", "Else"},
+		"missing vendor":    {"Image Models"},
+		"empty":             nil,
 	}
 	for name, breadcrumb := range tests {
 		t.Run(name, func(t *testing.T) {

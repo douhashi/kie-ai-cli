@@ -1,65 +1,24 @@
 // Package pairs records which docs.kie.ai pages form a create/query pair.
 //
-// Market models need no table: one endpoint creates every task and one endpoint
-// reports on it. The standard APIs predate that design and each carries its own
-// record endpoint, and no page states which one belongs to which. The table
-// below is therefore read off the documentation by hand; anything it does not
-// cover fails the generation rather than producing a model nobody can poll.
+// Every model is a Market model: one endpoint creates every task and one
+// endpoint reports on it, so no pair needs a table. What is left to read off
+// the documentation by hand is which pages look like a model and are not one.
 package pairs
 
-// MarketCreatePath is the single endpoint every Market model is created with.
-// It is what distinguishes a Market page from a standard API page — the docs
-// URL does not, because a few Market models are filed outside /market/.
+// MarketCreatePath is the single endpoint every model is created with. It is
+// what tells a model's page apart — the docs URL does not, because Suno,
+// Veo3.1, Runway, 4o Image and Flux Kontext are filed outside /market/.
 const MarketCreatePath = "/api/v1/jobs/createTask"
 
 // MarketQuery is the docs page of the endpoint that reports on every Market
 // task.
 const MarketQuery = "market/common/get-task-detail"
 
-// queryOf maps the docs path of a create page to the docs path of the page
-// documenting the endpoint that reports on the tasks it produces.
-var queryOf = map[string]string{
-	"4o-image-api/generate-4-o-image":         "4o-image-api/get-4-o-image-details",
-	"flux-kontext-api/generate-or-edit-image": "flux-kontext-api/get-image-details",
-
-	"runway-api/generate-ai-video":    "runway-api/get-ai-video-details",
-	"runway-api/extend-ai-video":      "runway-api/get-ai-video-details",
-	"runway-api/generate-aleph-video": "runway-api/get-aleph-video-details",
-
-	"suno-api/generate-music":          "suno-api/get-music-details",
-	"suno-api/extend-music":            "suno-api/get-music-details",
-	"suno-api/upload-and-cover-audio":  "suno-api/get-music-details",
-	"suno-api/upload-and-extend-audio": "suno-api/get-music-details",
-	"suno-api/add-instrumental":        "suno-api/get-music-details",
-	"suno-api/add-vocals":              "suno-api/get-music-details",
-	"suno-api/generate-mashup":         "suno-api/get-music-details",
-	"suno-api/replace-section":         "suno-api/get-music-details",
-	"suno-api/generate-sounds":         "suno-api/get-music-details",
-
-	"suno-api/cover-suno":         "suno-api/get-cover-suno-details",
-	"suno-api/generate-lyrics":    "suno-api/get-lyrics-details",
-	"suno-api/convert-to-wav":     "suno-api/get-wav-details",
-	"suno-api/separate-vocals":    "suno-api/get-vocal-separation-details",
-	"suno-api/generate-midi":      "suno-api/get-midi-details",
-	"suno-api/create-music-video": "suno-api/get-music-video-details",
-
-	"suno-api/suno-voice-validate":   "suno-api/suno-voice-validate-info",
-	"suno-api/suno-voice-regenerate": "suno-api/suno-voice-validate-info",
-	"suno-api/suno-voice-generate":   "suno-api/suno-voice-record-info",
-
-	"veo3-api/generate-veo-3-video": "veo3-api/get-veo-3-video-details",
-	"veo3-api/extend-video":         "veo3-api/get-veo-3-video-details",
-	// Upgrading to 4K is a task of its own: it answers with a new task id and
-	// its own callback, and the response documents Get Video Details as the way
-	// to follow it.
-	"veo3-api/get-veo-3-4k-video": "veo3-api/get-veo-3-video-details",
-}
-
 // notModels are the pages that return a task id yet cannot be run as a model.
-// Query endpoints are added at init, so only the odd ones are listed here.
+// The query endpoint is added at init, so only the odd ones are listed here.
 var notModels = map[string]string{
 	"suno-api/boost-music-style": "returns the boosted style in the response itself, " +
-		"and kie.ai documents no endpoint to query its task id with",
+		"so there is no task left to follow",
 }
 
 // claimsModelID names pages that state a model id another page owns. Two pages
@@ -86,16 +45,7 @@ var claimsModelID = map[string]string{
 }
 
 func init() {
-	for _, query := range queryOf {
-		notModels[query] = "reports on tasks a create endpoint produced"
-	}
 	notModels[MarketQuery] = "reports on every Market task"
-}
-
-// Query returns the docs page of the query endpoint paired with a create page.
-func Query(createPath string) (queryPath string, ok bool) {
-	queryPath, ok = queryOf[createPath]
-	return queryPath, ok
 }
 
 // Excluded reports why a page that submits nothing the CLI can track is not a

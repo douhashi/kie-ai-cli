@@ -21,9 +21,10 @@ keeps a local ledger of everything it sent.
 
 - **Submit and walk away.** Creating a task records it in a local ledger and
   exits immediately. Status checks and downloads are separate commands.
-- **One kind of model.** Market models and the older per-service APIs
-  (Suno, Veo3, 4o Image, Flux Kontext, Runway) are exposed the same way. A model
-  is one create/query pair, addressed by a model ID.
+- **One kind of model.** Every model, Suno, Veo3.1, 4o Image, Flux Kontext and
+  Runway included, is created and followed through kie.ai's Market endpoints.
+  A model is one create/query pair, addressed by the model ID kie.ai itself
+  uses (`ai-music-api/generate-lyrics`, `veo-3-1`).
 - **A catalog generated from the docs.** Models, their endpoints and their input
   schemas are derived from the OpenAPI specifications embedded in the kie.ai
   documentation, so new models can be picked up without hand-written definitions.
@@ -92,7 +93,9 @@ how many models it holds, and, for a downloaded one, the directory it sits in.
 There is no command to go back: delete that directory and the binary returns to
 the catalog it was built with. A downloaded catalog this binary cannot read is
 reported rather than skipped over, so the origin `catalog show` names is always
-the one actually in use.
+the one actually in use. A published catalog in a shape this binary does not
+know is refused before anything is written, and the catalog in place is kept;
+a newer release is what reads it.
 
 `task run` takes the model ID as the first argument after the verb and its
 inputs as flags named after the model's own input fields. `--input` accepts the
@@ -115,17 +118,13 @@ recording it afterwards fails: it is the only handle on what was bought.
 Nothing waits for a result. `task refresh` asks kie.ai about every task that
 has not finished yet and writes down what it says; `task list` only reads the
 ledger, and reports at the end how many of its rows may already be out of date.
-A task is `submitted`, `running`, `succeeded` or `failed`: kie.ai describes each
-family of models in a vocabulary of its own, and those four are what they are
-normalised to.
+A task is `submitted`, `running`, `succeeded` or `failed`: what kie.ai answers
+is normalised to those four.
 
-Three query endpoints are understood, which covers 145 of the 161 models in the
-catalog. `task refresh` names the rest by task ID and endpoint and leaves their
-rows exactly as they were, rather than guessing: the same field means "failed"
-on one endpoint and "still generating" on another, so a reading taken from the
-documentation alone would be written into the ledger as fact. Submitting to them
-is not restricted and their task IDs are kept, so they can be collected once
-their answers have been read against the live API.
+Every model in the catalog is followed through the one Market query endpoint.
+A model whose query endpoint this build cannot read -- which only a hand-made
+catalog can hold -- is named by task ID and endpoint and its row is left exactly
+as it was, rather than guessed at.
 
 `task download` writes what a task produced into a directory — the current one
 unless `--dir` names another, which is made if it is not there. Each result is

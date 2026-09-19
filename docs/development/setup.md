@@ -49,10 +49,10 @@ infisical run -- go test -tags e2e ./...
 `mise run catalog` が `docs.kie.ai/llms.txt` を起点に英語版の API ページを巡回し、
 `internal/catalog/catalog.json` を書き直す。API キーは要らない。
 
-想定外のページ（OpenAPI が無い・パスが複数・モデル ID が一意でない）に当たったら
-**カタログを書かずに落ちる**。取りこぼしを黙って落とすと、必要になるまで誰も
-気づかないからである。落ちたら理由に挙がった URL を読み、
-`internal/catalog/gen/pairs` の表を直す。
+想定外のページ（OpenAPI が無い・パスが複数・モデル ID が一意でない・Market 以外で
+taskId を返す）に当たったら **カタログを書かずに落ちる**。取りこぼしを黙って落とすと、
+必要になるまで誰も気づかないからである。落ちたら理由に挙がった URL を読み、
+生成器を直すか、モデルでないページなら `internal/catalog/gen/pairs` の除外表へ足す。
 
 231 ページを取りに行くので、開発中に何度も回すときはページを再利用する。
 

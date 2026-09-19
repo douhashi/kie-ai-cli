@@ -219,7 +219,7 @@ func inputLines(out string) []string {
 func TestModelShowNamesRequirementsAndChoices(t *testing.T) {
 	isolate(t)
 
-	got := run(t, "model", "show", "4o-image-api/generate-4-o-image")
+	got := run(t, "model", "show", "4o-image-api")
 	if got.code != 0 {
 		t.Fatalf("model show: code %d, stderr %q", got.code, got.stderr)
 	}
@@ -282,7 +282,7 @@ func TestModelShowUnknownID(t *testing.T) {
 func TestModelShowJSON(t *testing.T) {
 	isolate(t)
 
-	got := run(t, "model", "show", "4o-image-api/generate-4-o-image", "--json")
+	got := run(t, "model", "show", "4o-image-api", "--json")
 	if got.code != 0 {
 		t.Fatalf("model show --json: code %d, stderr %q", got.code, got.stderr)
 	}
@@ -290,7 +290,7 @@ func TestModelShowJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(got.stdout), &m); err != nil {
 		t.Fatalf("output is not JSON (%v):\n%s", err, got.stdout)
 	}
-	if m.ID != "4o-image-api/generate-4-o-image" {
+	if m.ID != "4o-image-api" {
 		t.Errorf("id = %q, want the model that was asked for", m.ID)
 	}
 	if m.Create.Path == "" || m.Query.Path == "" {
