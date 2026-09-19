@@ -3,6 +3,7 @@ package catalog_test
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"os"
 	"slices"
 	"strconv"
@@ -251,7 +252,8 @@ func requiredNames(schema map[string]any) []string {
 }
 
 // walkObjects calls visit on every object schema reachable from schema,
-// together with the names it lists as required. The catalog is checked by
+// together with the names it lists as required. An alternative that only lists
+// required names is visited too, with nil properties. The catalog is checked by
 // walking the committed JSON itself rather than by asking the generator, so a
 // rule that stopped being applied shows up here.
 func walkObjects(schema map[string]any, visit func(properties map[string]any, required map[string]bool)) {
@@ -260,7 +262,7 @@ func walkObjects(schema map[string]any, visit func(properties map[string]any, re
 		required[name] = true
 	}
 	properties, _ := schema["properties"].(map[string]any)
-	if properties != nil {
+	if properties != nil || len(required) > 0 {
 		visit(properties, required)
 	}
 	for _, property := range properties {
@@ -278,6 +280,22 @@ func walkObjects(schema map[string]any, visit func(properties map[string]any, re
 	}
 	if items, ok := schema["items"].(map[string]any); ok {
 		walkObjects(items, visit)
+	}
+}
+
+// kie.ai reads a property by its trimmed name and ignores one spelled with a
+// blank around it (#60), so a blank left in the catalog would make `task run`
+// send a field kie.ai drops, and refuse the name kie.ai does read.
+func TestCommittedCatalogNamesCarryNoSurroundingBlanks(t *testing.T) {
+	for _, model := range committed(t).Models {
+		walkObjects(model.Input, func(properties map[string]any, required map[string]bool) {
+			names := slices.Concat(slices.Collect(maps.Keys(properties)), slices.Collect(maps.Keys(required)))
+			for _, name := range names {
+				if name != strings.TrimSpace(name) {
+					t.Errorf("%s: %q has blanks around it", model.ID, name)
+				}
+			}
+		})
 	}
 }
 

@@ -342,10 +342,35 @@ func resolveObject(node map[string]any, doc map[string]any, stack []string) (any
 		mergeKey(out, key, resolved)
 	}
 
+	// Some pages spell a property with a blank around it. kie.ai reads the
+	// trimmed name and ignores the spelled one (#60), so both the properties
+	// and the required list carry the trimmed name.
+	if properties, ok := out["properties"].(map[string]any); ok {
+		trimmed, err := trimmedNames(properties)
+		if err != nil {
+			return nil, err
+		}
+		out["properties"] = trimmed
+	}
 	// required is a set, and it can be assembled from several sources, so it is
 	// sorted to keep the generated catalog byte-identical between runs.
 	if required, ok := out["required"].([]any); ok {
-		out["required"] = sortedStrings(required)
+		out["required"] = sortedNames(required)
+	}
+	return out, nil
+}
+
+// trimmedNames rekeys properties by their trimmed names. Two properties that
+// only differ in blanks would leave one schema for a single name, and neither
+// is known to be the one kie.ai reads, so that fails instead.
+func trimmedNames(properties map[string]any) (map[string]any, error) {
+	out := make(map[string]any, len(properties))
+	for _, name := range slices.Sorted(maps.Keys(properties)) {
+		trimmed := strings.TrimSpace(name)
+		if _, taken := out[trimmed]; taken {
+			return nil, fmt.Errorf("properties %q and %q are the same name once trimmed", trimmed, name)
+		}
+		out[trimmed] = properties[name]
 	}
 	return out, nil
 }
@@ -386,14 +411,16 @@ func mergeKey(dst map[string]any, key string, value any) {
 	// referenced it has already contributed its own keys.
 }
 
-func sortedStrings(values []any) []any {
+// sortedNames trims, sorts and deduplicates a list of property names, leaving
+// it untouched when it holds anything but strings.
+func sortedNames(values []any) []any {
 	names := make([]string, 0, len(values))
 	for _, value := range values {
 		name, ok := value.(string)
 		if !ok {
 			return values
 		}
-		names = append(names, name)
+		names = append(names, strings.TrimSpace(name))
 	}
 	slices.Sort(names)
 	names = slices.Compact(names)
