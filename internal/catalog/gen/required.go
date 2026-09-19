@@ -69,6 +69,17 @@ var measured = map[modelProperty]bool{
 	// empty when type is split-stem-advanced." and created no task: that
 	// condition is left to kie.ai, per the comment above. #69, 2026-09-20.
 	{"ai-music-api/separate-vocals", "stem_name"}: false,
+	// Both carry a default voice, which kie.ai does not fill in. With text
+	// alone the TTS answered 422 "voiceId cannot be empty", though neither its
+	// required list nor the description says so. With a dialogue item carrying
+	// no voice the dialogue model answered code 500 "dialogue.0.voice is
+	// required", as its item schema already says. Neither created a task.
+	// #36, #70, 2026-09-20.
+	//
+	// The dialogue's voice sits in an array item, which the pre-submit check
+	// does not read, so there it only keeps the catalog saying so.
+	{"elevenlabs/text-to-speech-turbo-2-5", "voice"}: true,
+	{"elevenlabs/text-to-dialogue-v3", "voice"}:      true,
 }
 
 // MeasuredRequired reports what was measured for one property of one model:
@@ -250,8 +261,9 @@ func applyMeasuredInputRequired(model string, input map[string]any) error {
 
 // correctObject walks one object schema and the schemas below it, which is
 // where a property nested in an array item or a oneOf branch is reached. It
-// takes off the required list what kie.ai was measured to do without, and adds
-// what a description calls for and kie.ai was measured to refuse without.
+// takes off the required list what kie.ai was measured to do without, adds
+// what kie.ai was measured to refuse without, and reports what a description
+// calls for that nobody has measured.
 func correctObject(model string, schema map[string]any, unmeasured *[]string) {
 	properties, _ := schema["properties"].(map[string]any)
 	listed := requiredNames(schema)
@@ -266,15 +278,17 @@ func correctObject(model string, schema map[string]any, unmeasured *[]string) {
 			continue
 		}
 		correctObject(model, property, unmeasured)
-		description, _ := property["description"].(string)
-		if !UnconditionallyRequired(description) || slices.Contains(listed, name) {
+		if slices.Contains(listed, name) {
 			continue
 		}
-		switch required, pinned := MeasuredRequired(model, name); {
-		case !pinned:
+		if required, pinned := MeasuredRequired(model, name); pinned {
+			if required {
+				add = append(add, name)
+			}
+			continue
+		}
+		if description, _ := property["description"].(string); UnconditionallyRequired(description) {
 			*unmeasured = append(*unmeasured, name)
-		case required:
-			add = append(add, name)
 		}
 	}
 	// Nothing changed leaves the list byte-identical, and nothing left drops

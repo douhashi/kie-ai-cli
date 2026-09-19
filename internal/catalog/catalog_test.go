@@ -308,12 +308,14 @@ func TestCommittedCatalogNamesCarryNoSurroundingBlanks(t *testing.T) {
 // for that nobody has measured.
 func TestCommittedCatalogAgreesWithTheMeasuredRequirements(t *testing.T) {
 	// Properties carrying the wording or a measurement when this was written
-	// (#51, #69). Listing them keeps the test from passing because the walk
-	// stopped reaching anything.
+	// (#51, #69, #70). Listing them keeps the test from passing because the
+	// walk stopped reaching anything.
 	seen := map[string]bool{}
 	want := []string{
 		"ai-music-api/extend.audio_id",
 		"ai-music-api/separate-vocals.stem_name",
+		"elevenlabs/text-to-dialogue-v3.voice",
+		"elevenlabs/text-to-speech-turbo-2-5.voice",
 		"veo-3-1.prompt",
 	}
 	for _, model := range committed(t).Models {

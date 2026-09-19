@@ -85,6 +85,26 @@ func TestCorrectRequiredRemovesWhatTheAPIDoesWithout(t *testing.T) {
 	}
 }
 
+// Upstream may also leave a property off the list without its description
+// saying anything about it. A refusal measured without it adds it all the same
+// (#70).
+func TestCorrectRequiredAddsWhatTheAPIRefusesWithoutWhateverTheDescriptionSays(t *testing.T) {
+	pinMeasured(t, map[modelProperty]bool{{"vendor/model", "voice"}: true})
+	schema := map[string]any{
+		"required": []any{"text"},
+		"properties": map[string]any{
+			"text":  map[string]any{"description": "The text to convert to speech."},
+			"voice": map[string]any{"description": "The voice to use for speech generation."},
+		},
+	}
+	if err := correctRequired("vendor/model", schema); err != nil {
+		t.Fatalf("correctRequired: %v", err)
+	}
+	if got, want := schema["required"], []any{"text", "voice"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("required = %v, want %v", got, want)
+	}
+}
+
 // Taking the only required name off must drop the list rather than leave an
 // empty one: the two mean the same, and an empty list would read as a schema
 // that states its requirements.
