@@ -81,11 +81,12 @@ func MeasuredRequired(model, property string) (required, pinned bool) {
 // needs (#35).
 //
 // What those models really insist on is settled the same way as above and
-// recorded in the same shape, keyed by model rather than by property: the list
-// is what every request has to carry. An empty list is the measured answer
-// that no one property is -- either because the endpoint takes a request
-// carrying nothing at all, or because it wants one of several, which a flat
-// list cannot say and the endpoint's own 422 says instead.
+// recorded keyed by model rather than by property, as the alternatives a
+// request may choose between: each is a list of what that alternative has to
+// carry, and one complete alternative is enough. A single alternative is
+// written as the root's required list, several as anyOf branches that do
+// nothing but require, and none at all is the measured answer that the
+// endpoint takes a request carrying nothing.
 //
 // Unlike a disagreement, one of these that nobody has measured does not fail
 // the generation. Requiring nothing is the ordinary shape of a Market schema
@@ -96,19 +97,29 @@ func MeasuredRequired(model, property string) (required, pinned bool) {
 // answers with the 422 that names what is missing, at no charge. So the
 // unmeasured models are reported instead -- see UnmeasuredInputRequired --
 // and the report rides in the pull request the scheduled crawl opens.
-var measuredInputRequired = map[string][]string{
+var measuredInputRequired = map[string][][]string{
 	// All four answered a request whose only field was an unreachable
 	// first_frame_url with a taskId, so neither the prompt nor the
 	// aspect_ratio their pages call a "Required field." is one: the task was
 	// created, failed fetching the image, and every credit held for it was
 	// given back. Asked with an empty input they answer 422 "Please fill in
-	// the text prompt or image, video, or audio" -- one of those, not all of
-	// them, which no flat list can say; #43 carries the alternation.
-	// #35, 2026-08-24.
-	"bytedance/seedance-2":      {},
-	"bytedance/seedance-2-5":    {},
-	"bytedance/seedance-2-fast": {},
-	"bytedance/seedance-2-mini": {},
+	// the text prompt or image, video, or audio": any one of those will do.
+	// #35, 2026-08-24; the alternation #43.
+	//
+	// Only the prompt and first_frame_url alternatives were measured. The
+	// other media are listed on the strength of that message, because leaving
+	// one out would have the CLI refuse a request kie.ai takes, while listing
+	// one it does not accept costs no more than its 422.
+	"bytedance/seedance-2":   seedance2Alternatives,
+	"bytedance/seedance-2-5": seedance2Alternatives,
+	// Its page spells the property "reference_video_urls " with a trailing
+	// blank, which is not a name anyone would send, so it is left out until
+	// the blank is dealt with upstream of this table (#60).
+	"bytedance/seedance-2-fast": {
+		{"prompt"}, {"first_frame_url"}, {"last_frame_url"},
+		{"reference_image_urls"}, {"reference_audio_urls"},
+	},
+	"bytedance/seedance-2-mini": seedance2Alternatives,
 	// Both took an empty input object and answered with a taskId, so there
 	// is nothing a caller has to supply. Each task then failed upstream, one
 	// giving back all 14.4 credits held for it and the other all but 2.0.
@@ -117,11 +128,19 @@ var measuredInputRequired = map[string][]string{
 	"grok-imagine/image-to-video":    {},
 }
 
-// MeasuredInputRequired reports what a request must carry for a model whose
-// input schema requires nothing, and whether anyone has measured it.
-func MeasuredInputRequired(model string) (required []string, pinned bool) {
-	required, pinned = measuredInputRequired[model]
-	return required, pinned
+// seedance2Alternatives are the text prompt and each of the media the seedance
+// 2 models take, any one of which is a request they accept.
+var seedance2Alternatives = [][]string{
+	{"prompt"}, {"first_frame_url"}, {"last_frame_url"},
+	{"reference_image_urls"}, {"reference_video_urls"}, {"reference_audio_urls"},
+}
+
+// MeasuredInputRequired reports the alternatives a request may choose between
+// for a model whose input schema requires nothing, and whether anyone has
+// measured them.
+func MeasuredInputRequired(model string) (alternatives [][]string, pinned bool) {
+	alternatives, pinned = measuredInputRequired[model]
+	return alternatives, pinned
 }
 
 // RequiresNothing reports whether an input schema names no required property
@@ -171,7 +190,9 @@ func correctRequired(model string, input map[string]any) error {
 	correctObject(model, input, &unmeasured)
 	// After the descriptions, because a correction they call for leaves the
 	// schema requiring something and so no longer silent.
-	applyMeasuredInputRequired(model, input)
+	if err := applyMeasuredInputRequired(model, input); err != nil {
+		return err
+	}
 	if len(unmeasured) == 0 {
 		return nil
 	}
@@ -186,15 +207,41 @@ func correctRequired(model string, input map[string]any) error {
 // so is one measured to take a request that carries nothing: an empty required
 // list is the same schema as no required list, and writing one would move a
 // line of the catalog for no change in meaning.
-func applyMeasuredInputRequired(model string, input map[string]any) {
+//
+// A measurement the schema cannot hold fails the generation: a name it does
+// not declare is one the CLI would refuse to send, and alternatives it already
+// offers would be read together with the measured ones as a single choice.
+func applyMeasuredInputRequired(model string, input map[string]any) error {
 	if !RequiresNothing(input) {
-		return
+		return nil
 	}
-	required, pinned := MeasuredInputRequired(model)
-	if !pinned || len(required) == 0 {
-		return
+	alternatives, pinned := MeasuredInputRequired(model)
+	if !pinned || len(alternatives) == 0 {
+		return nil
 	}
-	input["required"] = sortedRequired(required)
+	properties, _ := input["properties"].(map[string]any)
+	for _, alternative := range alternatives {
+		for _, name := range alternative {
+			if _, ok := properties[name]; !ok {
+				return fmt.Errorf("%s: measured to need %q, which its input schema does not declare; correct measuredInputRequired in internal/catalog/gen/required.go", model, name)
+			}
+		}
+	}
+	if len(alternatives) == 1 {
+		input["required"] = sortedRequired(alternatives[0])
+		return nil
+	}
+	for _, keyword := range []string{"oneOf", "anyOf"} {
+		if _, ok := input[keyword]; ok {
+			return fmt.Errorf("%s: measured to need one of several alternatives, but its input schema already offers %s; decide how the two combine in internal/catalog/gen/required.go", model, keyword)
+		}
+	}
+	branches := make([]any, len(alternatives))
+	for i, alternative := range alternatives {
+		branches[i] = map[string]any{"required": sortedRequired(alternative)}
+	}
+	input["anyOf"] = branches
+	return nil
 }
 
 // correctObject walks one object schema and the schemas below it, which is
@@ -249,10 +296,10 @@ func requiredNames(schema map[string]any) []string {
 
 // sortedRequired renders the list the way the resolved schema already holds
 // it: sorted and without repetition, so that the generated catalog stays
-// byte-identical between runs.
+// byte-identical between runs. It sorts a copy, so that a list read from a
+// measurement table is not reordered in place.
 func sortedRequired(names []string) []any {
-	slices.Sort(names)
-	names = slices.Compact(names)
+	names = slices.Compact(slices.Sorted(slices.Values(names)))
 	out := make([]any, len(names))
 	for i, name := range names {
 		out[i] = name

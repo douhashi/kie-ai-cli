@@ -83,7 +83,9 @@ kie skill install [--scope project|user] [--force]
 
 `model list` prints one line per model — ID, category, vendor and name — and
 `model show` adds the documentation link and every input field with its type,
-whether it is required, its default and the values it accepts.
+whether it is required, its default and the values it accepts. A model that
+wants any one of several fields lists each of them as a `one of (variant N)`
+group of its own, required there; one complete group is enough.
 
 `catalog update` downloads the published catalog into the state directory, and
 every command reads that copy from then on. `catalog show` reports which

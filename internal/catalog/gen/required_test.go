@@ -126,10 +126,9 @@ func silentSchema() map[string]any {
 	}
 }
 
-// pinInputRequired hands one test a measurement table of its own. Every model
-// in the real one was measured to take a request that carries nothing, so a
-// list that has to be applied is only reachable this way.
-func pinInputRequired(t *testing.T, table map[string][]string) {
+// pinInputRequired hands one test a measurement table of its own, so that each
+// shape a measurement can take is reachable whatever the real table holds.
+func pinInputRequired(t *testing.T, table map[string][][]string) {
 	t.Helper()
 	original := measuredInputRequired
 	measuredInputRequired = table
@@ -137,7 +136,7 @@ func pinInputRequired(t *testing.T, table map[string][]string) {
 }
 
 func TestCorrectRequiredAppliesWhatASilentSchemaWasMeasuredToNeed(t *testing.T) {
-	pinInputRequired(t, map[string][]string{"vendor/model": {"prompt", "aspect_ratio"}})
+	pinInputRequired(t, map[string][][]string{"vendor/model": {{"prompt", "aspect_ratio"}}})
 	schema := silentSchema()
 	if err := correctRequired("vendor/model", schema); err != nil {
 		t.Fatalf("correctRequired: %v", err)
@@ -147,11 +146,11 @@ func TestCorrectRequiredAppliesWhatASilentSchemaWasMeasuredToNeed(t *testing.T) 
 	}
 }
 
-// The measured answer for every model in the table so far: the endpoint takes
-// a request that carries nothing. An empty required list would say the same as
+// The measured answer for some models: the endpoint takes a request that
+// carries nothing. An empty required list would say the same as
 // no required list while moving a line of the catalog, so none is written.
 func TestCorrectRequiredWritesNoRequiredWhereNothingIsNeeded(t *testing.T) {
-	pinInputRequired(t, map[string][]string{"vendor/model": {}})
+	pinInputRequired(t, map[string][][]string{"vendor/model": {}})
 	schema := silentSchema()
 	if err := correctRequired("vendor/model", schema); err != nil {
 		t.Fatalf("correctRequired: %v", err)
@@ -165,7 +164,7 @@ func TestCorrectRequiredWritesNoRequiredWhereNothingIsNeeded(t *testing.T) {
 // not a contradiction, so the crawl carries on and the model is reported
 // instead of guessed at (#35).
 func TestCorrectRequiredCarriesOnPastAnUnmeasuredSilentSchema(t *testing.T) {
-	pinInputRequired(t, map[string][]string{})
+	pinInputRequired(t, map[string][][]string{})
 	schema := silentSchema()
 	if err := correctRequired("vendor/model", schema); err != nil {
 		t.Fatalf("correctRequired: %v", err)
@@ -183,7 +182,7 @@ func TestCorrectRequiredCarriesOnPastAnUnmeasuredSilentSchema(t *testing.T) {
 // requirements in the alternatives they offer instead. Those are not silent,
 // and a measurement must not overwrite what they already declare.
 func TestCorrectRequiredLeavesASchemaThatRequiresThroughItsBranches(t *testing.T) {
-	pinInputRequired(t, map[string][]string{"vendor/model": {"prompt"}})
+	pinInputRequired(t, map[string][][]string{"vendor/model": {{"prompt"}}})
 	schema := map[string]any{
 		"properties": map[string]any{"image_url": map[string]any{}, "prompt": map[string]any{}},
 		"oneOf": []any{
@@ -202,5 +201,82 @@ func TestCorrectRequiredLeavesASchemaThatRequiresThroughItsBranches(t *testing.T
 	}
 	if got := UnmeasuredInputRequired([]catalog.Model{{ID: "other/model", Input: schema}}); got != nil {
 		t.Errorf("UnmeasuredInputRequired = %v, want nothing to report", got)
+	}
+}
+
+// An endpoint that wants any one of several fields is measured as that many
+// alternatives. A flat list would demand all of them, so they are written as
+// anyOf branches that do nothing but require, in the order the table gives
+// them, which is the order `model show` numbers them in (#43).
+func TestCorrectRequiredWritesAlternativesAsAnyOf(t *testing.T) {
+	pinInputRequired(t, map[string][][]string{"vendor/model": {{"prompt"}, {"aspect_ratio"}}})
+	schema := silentSchema()
+	if err := correctRequired("vendor/model", schema); err != nil {
+		t.Fatalf("correctRequired: %v", err)
+	}
+	if _, ok := schema["required"]; ok {
+		t.Errorf("root required = %v, want none: no one field is needed on its own", schema["required"])
+	}
+	want := []any{
+		map[string]any{"required": []any{"prompt"}},
+		map[string]any{"required": []any{"aspect_ratio"}},
+	}
+	if got := schema["anyOf"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("anyOf = %v, want %v", got, want)
+	}
+	if RequiresNothing(schema) {
+		t.Error("a schema that requires through the alternatives it was given is not silent")
+	}
+}
+
+// A name the schema does not declare would make an alternative no request can
+// complete -- the CLI refuses the field before it is sent -- so a table that
+// has drifted from the page fails the crawl rather than locking the model out.
+func TestCorrectRequiredFailsOnAMeasuredNameTheSchemaDoesNotDeclare(t *testing.T) {
+	for name, alternatives := range map[string][][]string{
+		"one alternative": {{"prompt", "promt"}},
+		"alternatives":    {{"prompt"}, {"promt"}},
+		"trailing blank":  {{"prompt "}, {"aspect_ratio"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pinInputRequired(t, map[string][][]string{"vendor/model": alternatives})
+			schema := silentSchema()
+			err := correctRequired("vendor/model", schema)
+			if err == nil {
+				t.Fatal("want an error for a name the schema does not declare")
+			}
+			for _, want := range []string{"vendor/model", "required.go"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %v, want it to mention %q", err, want)
+				}
+			}
+			if !reflect.DeepEqual(schema, silentSchema()) {
+				t.Errorf("schema = %v, want it left as it was", schema)
+			}
+		})
+	}
+}
+
+// Alternatives the schema already offers, requiring nothing, would be merged
+// with the measured ones into a single choice by every reader of the catalog,
+// which says something neither of them does. Nothing in the catalog takes that
+// shape, so meeting one fails the crawl instead of being guessed at.
+func TestCorrectRequiredFailsWhereTheSchemaAlreadyOffersAlternatives(t *testing.T) {
+	for _, keyword := range []string{"oneOf", "anyOf"} {
+		t.Run(keyword, func(t *testing.T) {
+			pinInputRequired(t, map[string][][]string{"vendor/model": {{"prompt"}, {"aspect_ratio"}}})
+			schema := silentSchema()
+			schema[keyword] = []any{map[string]any{"title": "Silent"}}
+			err := correctRequired("vendor/model", schema)
+			if err == nil {
+				t.Fatal("want an error for a schema that already offers alternatives")
+			}
+			if !strings.Contains(err.Error(), keyword) {
+				t.Errorf("error = %v, want it to mention %q", err, keyword)
+			}
+			if _, ok := schema["required"]; ok {
+				t.Errorf("required = %v, want the schema left as it was", schema["required"])
+			}
+		})
 	}
 }

@@ -215,6 +215,38 @@
         "param": "taskId"
       },
       "input": {
+        "anyOf": [
+          {
+            "required": [
+              "prompt"
+            ]
+          },
+          {
+            "required": [
+              "first_frame_url"
+            ]
+          },
+          {
+            "required": [
+              "last_frame_url"
+            ]
+          },
+          {
+            "required": [
+              "reference_image_urls"
+            ]
+          },
+          {
+            "required": [
+              "reference_video_urls"
+            ]
+          },
+          {
+            "required": [
+              "reference_audio_urls"
+            ]
+          }
+        ],
         "description": "Input parameters for the generation task",
         "properties": {
           "aspect_ratio": {
@@ -350,6 +382,38 @@
         "param": "taskId"
       },
       "input": {
+        "anyOf": [
+          {
+            "required": [
+              "prompt"
+            ]
+          },
+          {
+            "required": [
+              "first_frame_url"
+            ]
+          },
+          {
+            "required": [
+              "last_frame_url"
+            ]
+          },
+          {
+            "required": [
+              "reference_image_urls"
+            ]
+          },
+          {
+            "required": [
+              "reference_video_urls"
+            ]
+          },
+          {
+            "required": [
+              "reference_audio_urls"
+            ]
+          }
+        ],
         "description": "Input parameters for the generation task",
         "properties": {
           "aspect_ratio": {
@@ -494,6 +558,33 @@
         "param": "taskId"
       },
       "input": {
+        "anyOf": [
+          {
+            "required": [
+              "prompt"
+            ]
+          },
+          {
+            "required": [
+              "first_frame_url"
+            ]
+          },
+          {
+            "required": [
+              "last_frame_url"
+            ]
+          },
+          {
+            "required": [
+              "reference_image_urls"
+            ]
+          },
+          {
+            "required": [
+              "reference_audio_urls"
+            ]
+          }
+        ],
         "description": "Input parameters for the generation task",
         "properties": {
           "aspect_ratio": {
@@ -627,6 +718,38 @@
         "param": "taskId"
       },
       "input": {
+        "anyOf": [
+          {
+            "required": [
+              "prompt"
+            ]
+          },
+          {
+            "required": [
+              "first_frame_url"
+            ]
+          },
+          {
+            "required": [
+              "last_frame_url"
+            ]
+          },
+          {
+            "required": [
+              "reference_image_urls"
+            ]
+          },
+          {
+            "required": [
+              "reference_video_urls"
+            ]
+          },
+          {
+            "required": [
+              "reference_audio_urls"
+            ]
+          }
+        ],
         "description": "Input parameters for the generation task",
         "properties": {
           "aspect_ratio": {

@@ -289,7 +289,7 @@ func inputGroups(input map[string]any) []inputGroup {
 	}
 	variant := 0
 	for _, b := range s.branches {
-		fields := fieldsOf(b.schema)
+		fields := branchFields(s.root, b.schema)
 		if len(fields) == 0 {
 			continue
 		}
@@ -301,6 +301,23 @@ func inputGroups(input map[string]any) []inputGroup {
 		groups = append(groups, inputGroup{label: label, fields: fields})
 	}
 	return groups
+}
+
+// branchFields reads one alternative. Most declare the fields they take, but
+// one may only name which of the root's fields it needs -- the catalog's way of
+// saying "any one of these" (#43) -- and then those are its fields, required.
+func branchFields(root, branch map[string]any) []inputField {
+	if len(propertiesOf(branch)) > 0 {
+		return fieldsOf(branch)
+	}
+	declared := propertiesOf(root)
+	var fields []inputField
+	for _, name := range requiredOf(branch) {
+		if property, ok := declared[name].(map[string]any); ok {
+			fields = append(fields, newInputField(name, property, true))
+		}
+	}
+	return fields
 }
 
 // fieldsOf reads one object schema, required fields first: those are what the
