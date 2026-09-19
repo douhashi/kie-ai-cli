@@ -421,13 +421,30 @@ func TestCommittedCatalogAgreesWithTheMeasuredInputRequirements(t *testing.T) {
 		if !pinned {
 			continue
 		}
-		want = slices.Compact(slices.Sorted(slices.Values(want)))
-		got := requiredNames(model.Input)
-		if len(got) == 0 && len(want) == 0 {
-			continue
+		// The generator writes each alternative sorted and without repetition.
+		normalized := make([][]string, len(want))
+		for i, alternative := range want {
+			normalized[i] = slices.Compact(slices.Sorted(slices.Values(alternative)))
 		}
-		if !slices.Equal(got, want) {
-			t.Errorf("%s: the catalog requires %v, but a request was measured to need %v", model.ID, got, want)
+		got := requiredAlternatives(model.Input)
+		if !slices.EqualFunc(got, normalized, slices.Equal) {
+			t.Errorf("%s: the catalog requires one of %v, but a request was measured to need one of %v", model.ID, got, normalized)
 		}
 	}
+}
+
+// requiredAlternatives reads what a schema requires in the shape the
+// measurements are pinned in: the root's own list as the one alternative there
+// is, or else what each anyOf branch requires, in order.
+func requiredAlternatives(input map[string]any) [][]string {
+	if names := requiredNames(input); len(names) > 0 {
+		return [][]string{names}
+	}
+	var out [][]string
+	branches, _ := input["anyOf"].([]any)
+	for _, raw := range branches {
+		branch, _ := raw.(map[string]any)
+		out = append(out, requiredNames(branch))
+	}
+	return out
 }

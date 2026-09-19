@@ -2,6 +2,8 @@ package cli_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -256,6 +258,40 @@ func TestModelShowListsTheBranchesOfASchemaWithoutProperties(t *testing.T) {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("output lacks %q:\n%s", want, got.stdout)
 		}
+	}
+}
+
+// AC3 of #43: the seedance 2 models want any one of a prompt and five media,
+// and the listing says so as six alternatives of one required field each.
+func TestModelShowListsAnyOneOfSeveralFieldsAsAlternatives(t *testing.T) {
+	isolate(t)
+
+	got := run(t, "model", "show", "bytedance/seedance-2")
+	if got.code != 0 {
+		t.Fatalf("model show: code %d, stderr %q", got.code, got.stderr)
+	}
+	want := []string{
+		"prompt", "first_frame_url", "last_frame_url",
+		"reference_image_urls", "reference_video_urls", "reference_audio_urls",
+	}
+	out := lines(got.stdout)
+	for i, name := range want {
+		label := fmt.Sprintf("one of (variant %d)", i+1)
+		at := slices.Index(out, label)
+		if at < 0 || at+1 >= len(out) {
+			t.Errorf("output lacks %q:\n%s", label, got.stdout)
+			continue
+		}
+		fields := strings.Fields(out[at+1])
+		if len(fields) < 3 || fields[0] != name || fields[2] != "required" {
+			t.Errorf("%s is followed by %q, want %s as a required field", label, out[at+1], name)
+		}
+		if at+2 < len(out) && out[at+2] != "" {
+			t.Errorf("%s lists more than one field: %q", label, out[at+2])
+		}
+	}
+	if slices.Contains(out, fmt.Sprintf("one of (variant %d)", len(want)+1)) {
+		t.Errorf("more alternatives than the %d measured:\n%s", len(want), got.stdout)
 	}
 }
 

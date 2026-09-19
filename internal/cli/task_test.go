@@ -286,6 +286,14 @@ func TestTaskRunRefusesBeforeItSubmits(t *testing.T) {
 			want: []string{"video_urls", "Video Input Only", "Video with Images"},
 		},
 		{
+			// #43: kie.ai answers 422 to an empty seedance 2 request, so
+			// it is refused here, where it costs nothing.
+			name: "none of any-one-of fields is given",
+			code: 1,
+			args: []string{"task", "run", "bytedance/seedance-2-mini"},
+			want: []string{"none of the alternatives is complete", `"prompt"`, `"first_frame_url"`},
+		},
+		{
 			name:  "the document is not a JSON object",
 			code:  1,
 			args:  []string{"task", "run", "qwen/text-to-image", "--input", "-"},
@@ -349,6 +357,27 @@ func TestTaskRunAcceptsOneCompleteAlternative(t *testing.T) {
 	}
 	if canonical(t, stub.body) != canonical(t, want) {
 		t.Errorf("body = %s, want %s", canonical(t, stub.body), canonical(t, want))
+	}
+}
+
+// #43: any one of the fields the seedance 2 models take is a request kie.ai
+// accepts, whether it is the prompt or an image alone.
+func TestTaskRunAcceptsAnyOneOfSeveralFields(t *testing.T) {
+	for name, args := range map[string][]string{
+		"the prompt alone":   {"--prompt", "a cat in a hat"},
+		"an image URL alone": {"--first_frame_url", "https://file.kie.ai/a.png"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, stub := submitter(t)
+
+			got := run(t, append([]string{"task", "run", "bytedance/seedance-2-mini"}, args...)...)
+			if got.code != 0 {
+				t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
+			}
+			if stub.calls != 1 {
+				t.Errorf("the API was called %d times, want once", stub.calls)
+			}
+		})
 	}
 }
 

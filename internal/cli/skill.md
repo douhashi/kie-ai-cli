@@ -40,8 +40,10 @@ field the catalog does not list is refused before anything is sent.
 ```
 
 `model show` prints the documentation link and every input field with its type,
-whether it is required, its default and the values it accepts. Read it before
-submitting: the catalog is the only description of the model this tool has.
+whether it is required, its default and the values it accepts. Groups headed
+`one of (variant N)` are alternatives: complete any one of them, not all. Read
+it before submitting: the catalog is the only description of the model this
+tool has.
 
 If the model the user names is not listed, `{{.Program}} catalog update` fetches a newer
 catalog, and `{{.Program}} catalog show` says how old the one in effect is.

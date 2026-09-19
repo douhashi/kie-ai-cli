@@ -203,6 +203,52 @@ func TestInputGroups(t *testing.T) {
 	}
 }
 
+// An alternative may do nothing but name which of the root's fields it needs,
+// which is how the catalog says "any one of these" (#43). Showing only the
+// branch's own properties would drop it, so its fields are looked up in the
+// root and shown as the required fields they are in that alternative.
+func TestInputGroupsResolvesARequiredOnlyBranchFromTheRoot(t *testing.T) {
+	groups := inputGroups(schema(t, `{
+	  "properties": {
+	    "prompt": {"type": "string", "description": "The prompt."},
+	    "image_url": {"type": "string"},
+	    "seed": {"type": "integer"}
+	  },
+	  "anyOf": [{"required": ["prompt"]}, {"required": ["image_url"]}]
+	}`))
+
+	want := []struct {
+		label    string
+		fields   string
+		required bool
+	}{
+		{label: "", fields: "image_url,prompt,seed", required: false},
+		{label: "one of (variant 1)", fields: "prompt", required: true},
+		{label: "one of (variant 2)", fields: "image_url", required: true},
+	}
+	if len(groups) != len(want) {
+		t.Fatalf("got %d groups, want %d: %+v", len(groups), len(want), groups)
+	}
+	for i, w := range want {
+		if groups[i].label != w.label {
+			t.Errorf("group %d label = %q, want %q", i, groups[i].label, w.label)
+		}
+		var names []string
+		for _, f := range groups[i].fields {
+			names = append(names, f.name)
+			if f.required != w.required {
+				t.Errorf("group %d field %s required = %v, want %v", i, f.name, f.required, w.required)
+			}
+		}
+		if strings.Join(names, ",") != w.fields {
+			t.Errorf("group %d fields = %v, want %v", i, names, w.fields)
+		}
+	}
+	if got := groups[1].fields[0].description; got != "The prompt." {
+		t.Errorf("description = %q, want the root's description of the field", got)
+	}
+}
+
 // Required fields come first: they are what the caller must supply, and the
 // rest of the listing is only interesting once they are known.
 func TestInputGroupsPutsRequiredFirst(t *testing.T) {
