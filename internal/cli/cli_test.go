@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -116,10 +117,13 @@ type state struct {
 	APIKeyState  string `json:"api_key_state"`
 	APIKeySource string `json:"api_key_source"`
 	APIKeyMasked string `json:"api_key_masked"`
-	Root         string `json:"root"`
-	ConfigFile   string `json:"config_file"`
-	CatalogDir   string `json:"catalog_dir"`
-	LedgerFile   string `json:"ledger_file"`
+	// The rate is a pointer so that a missing field is told apart from 0.
+	USDPerCredit       *float64 `json:"usd_per_credit"`
+	USDPerCreditSource string   `json:"usd_per_credit_source"`
+	Root               string   `json:"root"`
+	ConfigFile         string   `json:"config_file"`
+	CatalogDir         string   `json:"catalog_dir"`
+	LedgerFile         string   `json:"ledger_file"`
 }
 
 func TestConfigSetJSONReturnsTheNewState(t *testing.T) {
@@ -131,18 +135,20 @@ func TestConfigSetJSONReturnsTheNewState(t *testing.T) {
 	}
 	assertNoLeak(t, got.stdout)
 
-	var s state
-	if err := json.Unmarshal([]byte(got.stdout), &s); err != nil {
-		t.Fatalf("output is not JSON (%v):\n%s", err, got.stdout)
+	s := decodeState(t, got.stdout)
+	if s.USDPerCredit == nil || *s.USDPerCredit != config.DefaultUSDPerCredit {
+		t.Errorf("usd_per_credit = %v, want the default %v", s.USDPerCredit, config.DefaultUSDPerCredit)
 	}
+	s.USDPerCredit = nil
 	want := state{
-		APIKeyState:  "set",
-		APIKeySource: "file",
-		APIKeyMasked: "****7f31",
-		Root:         layout.Root,
-		ConfigFile:   layout.Config,
-		CatalogDir:   layout.Catalog,
-		LedgerFile:   layout.Ledger,
+		APIKeyState:        "set",
+		APIKeySource:       "file",
+		APIKeyMasked:       "****7f31",
+		USDPerCreditSource: "default",
+		Root:               layout.Root,
+		ConfigFile:         layout.Config,
+		CatalogDir:         layout.Catalog,
+		LedgerFile:         layout.Ledger,
 	}
 	if s != want {
 		t.Errorf("state = %+v, want %+v", s, want)
@@ -164,12 +170,91 @@ func TestConfigShowJSONWithoutAKey(t *testing.T) {
 	if got.code != 0 {
 		t.Fatalf("config show --json: code %d, stderr %q", got.code, got.stderr)
 	}
-	var s state
-	if err := json.Unmarshal([]byte(got.stdout), &s); err != nil {
-		t.Fatalf("output is not JSON (%v):\n%s", err, got.stdout)
-	}
+	s := decodeState(t, got.stdout)
 	if s.APIKeyState != "unset" || s.APIKeySource != "" || s.APIKeyMasked != "" {
 		t.Errorf("state = %+v, want an unset key with no source and no mask", s)
+	}
+}
+
+func decodeState(t *testing.T, stdout string) state {
+	t.Helper()
+	var s state
+	if err := json.Unmarshal([]byte(stdout), &s); err != nil {
+		t.Fatalf("output is not JSON (%v):\n%s", err, stdout)
+	}
+	return s
+}
+
+// V1: setting the rate leaves the key that is already stored as it was, and
+// config show then reports the rate as coming from the file.
+func TestConfigSetUSDPerCreditKeepsTheKey(t *testing.T) {
+	layout := isolate(t)
+	if got := run(t, "config", "set", "api_key", secret); got.code != 0 {
+		t.Fatalf("config set api_key: code %d, stderr %q", got.code, got.stderr)
+	}
+
+	got := run(t, "config", "set", "usd_per_credit", "0.004", "--json")
+	if got.code != 0 {
+		t.Fatalf("config set usd_per_credit: code %d, stderr %q", got.code, got.stderr)
+	}
+	stored, err := config.Load(layout.Config)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if stored.APIKey != secret {
+		t.Errorf("stored key = %q, want the one set before the rate", stored.APIKey)
+	}
+	if stored.USDPerCredit == nil || *stored.USDPerCredit != 0.004 {
+		t.Errorf("stored rate = %v, want 0.004", stored.USDPerCredit)
+	}
+	assertNoLeak(t, got.stdout)
+	s := decodeState(t, got.stdout)
+	if s.APIKeyState != "set" || s.USDPerCredit == nil || *s.USDPerCredit != 0.004 || s.USDPerCreditSource != "file" {
+		t.Errorf("state = %+v, want the key still set and the rate 0.004 from the file", s)
+	}
+
+	text := run(t, "config", "show")
+	if !regexp.MustCompile(`(?m)^usd_per_credit +0\.004 \(file\)$`).MatchString(text.stdout) {
+		t.Errorf("config show does not report the rate from the file:\n%s", text.stdout)
+	}
+}
+
+func TestConfigShowReportsTheDefaultRate(t *testing.T) {
+	isolate(t)
+
+	got := run(t, "config", "show")
+	if got.code != 0 {
+		t.Fatalf("config show: code %d, stderr %q", got.code, got.stderr)
+	}
+	if !regexp.MustCompile(`(?m)^usd_per_credit +0\.005 \(default\)$`).MatchString(got.stdout) {
+		t.Errorf("config show does not report the default rate:\n%s", got.stdout)
+	}
+}
+
+// A rate that is refused leaves the stored configuration as it was.
+func TestConfigSetRefusesARateNoCreditCanCost(t *testing.T) {
+	for _, value := range []string{"0", "-0.005", "NaN", "Inf", "abc"} {
+		t.Run(value, func(t *testing.T) {
+			layout := isolate(t)
+			if got := run(t, "config", "set", "api_key", secret); got.code != 0 {
+				t.Fatalf("config set api_key: code %d, stderr %q", got.code, got.stderr)
+			}
+
+			got := run(t, "config", "set", "usd_per_credit", "--", value)
+			if got.code != 2 {
+				t.Errorf("code = %d, want 2 (stderr %q)", got.code, got.stderr)
+			}
+			if !strings.Contains(got.stderr, "usd_per_credit") {
+				t.Errorf("stderr does not name the key:\n%s", got.stderr)
+			}
+			stored, err := config.Load(layout.Config)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if stored.APIKey != secret || stored.USDPerCredit != nil {
+				t.Errorf("stored = %+v, want the key alone as before", stored)
+			}
+		})
 	}
 }
 

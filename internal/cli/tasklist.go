@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/douhashi/kie-ai-cli/internal/catalog"
+	"github.com/douhashi/kie-ai-cli/internal/config"
 	"github.com/douhashi/kie-ai-cli/internal/kie"
 	"github.com/douhashi/kie-ai-cli/internal/ledger"
 )
@@ -251,14 +252,25 @@ type taskSummary struct {
 	// CreditsConsumed is null where nothing has said what the task cost,
 	// so that a consumer cannot read "no record" as "cost nothing".
 	CreditsConsumed *float64 `json:"creditsConsumed"`
-	CreatedAt       string   `json:"createdAt"`
-	UpdatedAt       string   `json:"updatedAt"`
+	// EstimatedUSD is CreditsConsumed converted at the rate in effect now,
+	// and null wherever CreditsConsumed is.
+	EstimatedUSD *float64 `json:"estimatedUsd"`
+	CreatedAt    string   `json:"createdAt"`
+	UpdatedAt    string   `json:"updatedAt"`
 }
 
 // writeTasks prints a listing. Both commands use it: refresh answers with the
 // tasks it asked about, and there is no reason for the same rows to be laid
 // out two ways.
+//
+// The estimate in US dollars is made here, at the rate in effect when the
+// listing is printed, and never stored: kie.ai does not answer with a rate, so
+// the credits are the record and the dollars are a reading of it.
 func writeTasks(e *env, tasks []ledger.Task) error {
+	rate, err := config.ResolveUSDPerCredit(e.paths.Config)
+	if err != nil {
+		return err
+	}
 	if e.json {
 		summaries := make([]taskSummary, 0, len(tasks))
 		for _, task := range tasks {
@@ -270,32 +282,60 @@ func writeTasks(e *env, tasks []ledger.Task) error {
 				Error:           task.Error,
 				SavedPaths:      task.SavedPaths,
 				CreditsConsumed: task.CreditsConsumed,
+				EstimatedUSD:    estimateUSD(task.CreditsConsumed, rate.Value),
 				CreatedAt:       task.CreatedAt.Format(time.RFC3339),
 				UpdatedAt:       task.UpdatedAt.Format(time.RFC3339),
 			})
 		}
 		return writeJSON(e.stdout, summaries)
 	}
-	return writeTaskRows(e.stdout, tasks)
+	return writeTaskRows(e.stdout, tasks, rate.Value)
 }
 
-func writeTaskRows(w io.Writer, tasks []ledger.Task) error {
+func writeTaskRows(w io.Writer, tasks []ledger.Task, usdPerCredit float64) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, task := range tasks {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			task.TaskID, task.Status, task.ModelID,
-			task.CreatedAt.Format(time.RFC3339), orDash(creditsText(task.CreditsConsumed)), orDash(detail(task)))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			task.TaskID, task.Status, task.ModelID, task.CreatedAt.Format(time.RFC3339),
+			orDash(numberText(task.CreditsConsumed)), orDash(usdText(estimateUSD(task.CreditsConsumed, usdPerCredit))),
+			orDash(detail(task)))
 	}
 	return tw.Flush()
 }
 
-// creditsText renders what a task cost as kie.ai reported it, with no more
-// digits than the figure has, and nothing where there is no record.
-func creditsText(v *float64) string {
+// usdDigits is how many significant digits an estimate keeps: far more than
+// any rate is given with, and few enough to drop the error binary floating
+// point leaves in a product (0.4 x 0.1 comes out as 0.04000000000000001).
+const usdDigits = 12
+
+// estimateUSD converts what a task cost into US dollars at the given rate, and
+// is no record where the credits are none.
+func estimateUSD(credits *float64, usdPerCredit float64) *float64 {
+	if credits == nil {
+		return nil
+	}
+	// Formatting to a fixed number of significant digits and reading the
+	// text back is the rounding strconv does exactly; the text is always a
+	// valid number, so the error cannot occur.
+	v, _ := strconv.ParseFloat(strconv.FormatFloat(*credits*usdPerCredit, 'g', usdDigits, 64), 64)
+	return &v
+}
+
+// numberText renders a figure with no more digits than it has, and nothing
+// where there is no record.
+func numberText(v *float64) string {
 	if v == nil {
 		return ""
 	}
 	return strconv.FormatFloat(*v, 'f', -1, 64)
+}
+
+// usdText renders an estimate in US dollars, marked as an estimate.
+func usdText(v *float64) string {
+	if v == nil {
+		return ""
+	}
+	return "~$" + numberText(v)
 }
 
 // detail is the last column: what the task produced, or why it produced

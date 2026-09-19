@@ -129,7 +129,7 @@ func commands() []command {
 			noun: "config", verb: "set", args: "<key> <value>",
 			summary: "Set a configuration value.",
 			bind:    noFlags(runConfigSet),
-			arg:     fixed(keyAPIKey),
+			arg:     fixed(settingKeys()...),
 		},
 		{
 			noun: "config", verb: "show",

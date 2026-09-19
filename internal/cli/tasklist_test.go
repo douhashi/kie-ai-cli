@@ -222,9 +222,9 @@ func TestTaskListRefusesAnUnknownStatus(t *testing.T) {
 	}
 }
 
-// V4: the JSON contract gains creditsConsumed and nothing else changes. A task
-// no answer has said the cost of is null there, so that a consumer cannot read
-// "no record" as "cost nothing"; zero is zero.
+// V4: the JSON contract gains creditsConsumed and estimatedUsd and nothing else
+// changes. A task no answer has said the cost of is null in both, so that a
+// consumer cannot read "no record" as "cost nothing"; zero is zero.
 func TestTaskListAsJSON(t *testing.T) {
 	layout := isolate(t)
 	add(t, layout, "unrecorded", marketModel, kie.StatusSubmitted)
@@ -239,7 +239,7 @@ func TestTaskListAsJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(got.stdout), &raw); err != nil {
 		t.Fatalf("stdout is not JSON (%v):\n%s", err, got.stdout)
 	}
-	wantKeys := []string{"createdAt", "creditsConsumed", "modelId", "resultUrls", "savedPaths", "status", "taskId", "updatedAt"}
+	wantKeys := []string{"createdAt", "creditsConsumed", "estimatedUsd", "modelId", "resultUrls", "savedPaths", "status", "taskId", "updatedAt"}
 	wantCredits := map[string]string{"unrecorded": "null", "free": "0", "paid": "0.4"}
 	if len(raw) != len(wantCredits) {
 		t.Fatalf("listed %d tasks, want %d", len(raw), len(wantCredits))
@@ -283,8 +283,56 @@ func TestTaskListAsJSON(t *testing.T) {
 	}
 }
 
-// The table shows what a task cost in the column before the detail, and a dash
-// where nothing has said -- never a 0 that nobody reported.
+// V2, V3: estimatedUsd is what the task cost converted at the rate in effect
+// when it is listed -- the default until one is set, and the set one from then
+// on, for tasks recorded before as well. The product is rounded so that the
+// error of binary floating point (0.4 x 0.1 is 0.04000000000000001) never
+// reaches the reader.
+func TestTaskListEstimatesUSDAtTheRateInEffect(t *testing.T) {
+	layout := isolate(t)
+	add(t, layout, "unrecorded", marketModel, kie.StatusSubmitted)
+	costed(t, layout, "free", credits(0))
+	costed(t, layout, "paid", credits(18))
+	costed(t, layout, "fraction", credits(0.4))
+
+	for _, tt := range []struct {
+		rate string
+		want map[string]string
+	}{
+		{rate: "", want: map[string]string{"unrecorded": "null", "free": "0", "paid": "0.09", "fraction": "0.002"}},
+		{rate: "0.1", want: map[string]string{"unrecorded": "null", "free": "0", "paid": "1.8", "fraction": "0.04"}},
+		{rate: "0.007", want: map[string]string{"unrecorded": "null", "free": "0", "paid": "0.126", "fraction": "0.0028"}},
+	} {
+		if tt.rate != "" {
+			if got := run(t, "config", "set", "usd_per_credit", tt.rate); got.code != 0 {
+				t.Fatalf("config set usd_per_credit %s: code %d, stderr %q", tt.rate, got.code, got.stderr)
+			}
+		}
+		got := run(t, "task", "list", "--json")
+		if got.code != 0 {
+			t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
+		}
+		var rows []struct {
+			TaskID       string          `json:"taskId"`
+			EstimatedUSD json.RawMessage `json:"estimatedUsd"`
+		}
+		if err := json.Unmarshal([]byte(got.stdout), &rows); err != nil {
+			t.Fatalf("stdout is not JSON (%v):\n%s", err, got.stdout)
+		}
+		if len(rows) != len(tt.want) {
+			t.Fatalf("listed %d tasks, want %d", len(rows), len(tt.want))
+		}
+		for _, row := range rows {
+			if got := string(row.EstimatedUSD); got != tt.want[row.TaskID] {
+				t.Errorf("rate %q: %s: estimatedUsd = %s, want %s", tt.rate, row.TaskID, got, tt.want[row.TaskID])
+			}
+		}
+	}
+}
+
+// The table shows what a task cost, and the estimate in US dollars after it,
+// in the columns before the detail, and a dash where nothing has said -- never
+// a 0 that nobody reported. The tilde says the dollar figure is an estimate.
 func TestTaskListShowsWhatEachTaskCost(t *testing.T) {
 	layout := isolate(t)
 	add(t, layout, "unrecorded", marketModel, kie.StatusSubmitted)
@@ -296,15 +344,20 @@ func TestTaskListShowsWhatEachTaskCost(t *testing.T) {
 	if got.code != 0 {
 		t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
 	}
-	want := map[string]string{"unrecorded": "-", "free": "0", "paid": "18", "fraction": "0.4"}
+	want := map[string][2]string{
+		"unrecorded": {"-", "-"},
+		"free":       {"0", "~$0"},
+		"paid":       {"18", "~$0.09"},
+		"fraction":   {"0.4", "~$0.002"},
+	}
 	for _, line := range strings.Split(strings.TrimRight(got.stdout, "\n"), "\n") {
-		// id, status, model, created, credits, detail
+		// id, status, model, created, credits, usd, detail
 		fields := strings.Fields(line)
-		if len(fields) != 6 {
-			t.Fatalf("row %q has %d columns, want 6", line, len(fields))
+		if len(fields) != 7 {
+			t.Fatalf("row %q has %d columns, want 7", line, len(fields))
 		}
-		if fields[4] != want[fields[0]] {
-			t.Errorf("%s: credits column = %q, want %q", fields[0], fields[4], want[fields[0]])
+		if cost := [2]string{fields[4], fields[5]}; cost != want[fields[0]] {
+			t.Errorf("%s: credits and usd columns = %q, want %q", fields[0], cost, want[fields[0]])
 		}
 	}
 }

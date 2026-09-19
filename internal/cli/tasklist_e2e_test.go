@@ -4,6 +4,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -69,6 +70,7 @@ func TestTaskRefreshFollowsRealTasksToTheEnd(t *testing.T) {
 	// rather than a 0.
 	for _, taskID := range []string{market, lyrics} {
 		assertCreditsAsAnswered(t, key, taskID, recorded(t, layout, taskID).CreditsConsumed)
+		assertEstimatedAtTheDefaultRate(t, listed[taskID])
 	}
 
 	t.Logf("credits after: %s", balance(t, key))
@@ -139,6 +141,23 @@ func assertCreditsAsAnswered(t *testing.T, key, taskID string, got *float64) {
 	}
 }
 
+// assertEstimatedAtTheDefaultRate checks that the listing prices what a real
+// task cost at the default rate, and prices nothing where the cost is unknown.
+func assertEstimatedAtTheDefaultRate(t *testing.T, task listedTask) {
+	t.Helper()
+	t.Logf("%s: creditsConsumed %v, estimatedUsd %v", task.TaskID, deref(task.CreditsConsumed), deref(task.EstimatedUSD))
+	if task.CreditsConsumed == nil {
+		if task.EstimatedUSD != nil {
+			t.Errorf("%s: estimatedUsd = %v, want null where the cost is unknown", task.TaskID, *task.EstimatedUSD)
+		}
+		return
+	}
+	want := *task.CreditsConsumed * config.DefaultUSDPerCredit
+	if task.EstimatedUSD == nil || math.Abs(*task.EstimatedUSD-want) > 1e-9 {
+		t.Errorf("%s: estimatedUsd = %v, want about %v", task.TaskID, deref(task.EstimatedUSD), want)
+	}
+}
+
 // deref renders a figure that may be absent, for a log line.
 func deref(v *float64) any {
 	if v == nil {
@@ -164,9 +183,11 @@ func submit(t *testing.T, model string, args ...string) string {
 
 // listedTask is the part of the JSON contract this test reads.
 type listedTask struct {
-	TaskID string `json:"taskId"`
-	Status string `json:"status"`
-	Error  string `json:"error"`
+	TaskID          string   `json:"taskId"`
+	Status          string   `json:"status"`
+	Error           string   `json:"error"`
+	CreditsConsumed *float64 `json:"creditsConsumed"`
+	EstimatedUSD    *float64 `json:"estimatedUsd"`
 }
 
 // follow asks kie.ai about the unfinished tasks until none of them can move

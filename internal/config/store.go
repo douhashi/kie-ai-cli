@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // APIKeyEnv is the environment variable that overrides the configuration file.
@@ -24,6 +26,9 @@ const (
 // Settings is the content of the configuration file.
 type Settings struct {
 	APIKey string `json:"api_key,omitempty"`
+	// USDPerCredit is nil where the file says nothing, so that no setting is
+	// told apart from a setting that happens to equal the default.
+	USDPerCredit *float64 `json:"usd_per_credit,omitempty"`
 }
 
 // Load reads the configuration file. A missing file is not an error; it is an
@@ -95,22 +100,25 @@ func writeAndClose(f *os.File, data []byte) error {
 	return err
 }
 
-// KeySource says where a resolved API key was found.
-type KeySource string
+// Source says where a resolved setting was found.
+type Source string
 
 const (
-	// KeyUnset means no key is configured anywhere.
-	KeyUnset KeySource = ""
-	// KeyFromEnv means the key came from the environment variable.
-	KeyFromEnv KeySource = "env"
-	// KeyFromFile means the key came from the configuration file.
-	KeyFromFile KeySource = "file"
+	// SourceUnset means the setting is not configured anywhere.
+	SourceUnset Source = ""
+	// SourceEnv means the setting came from an environment variable.
+	SourceEnv Source = "env"
+	// SourceFile means the setting came from the configuration file.
+	SourceFile Source = "file"
+	// SourceDefault means nothing configured the setting and the built-in
+	// value is in effect.
+	SourceDefault Source = "default"
 )
 
 // APIKey is a resolved key together with where it was found.
 type APIKey struct {
 	Value  string
-	Source KeySource
+	Source Source
 }
 
 // ResolveAPIKey reports the key that is in effect. The environment variable
@@ -119,20 +127,20 @@ type APIKey struct {
 // treated as absent, because that is how a shell unsets one.
 func ResolveAPIKey(configPath string) (APIKey, error) {
 	if v := os.Getenv(APIKeyEnv); v != "" {
-		return APIKey{Value: v, Source: KeyFromEnv}, nil
+		return APIKey{Value: v, Source: SourceEnv}, nil
 	}
 	s, err := Load(configPath)
 	if err != nil {
 		return APIKey{}, err
 	}
 	if s.APIKey != "" {
-		return APIKey{Value: s.APIKey, Source: KeyFromFile}, nil
+		return APIKey{Value: s.APIKey, Source: SourceFile}, nil
 	}
-	return APIKey{Source: KeyUnset}, nil
+	return APIKey{Source: SourceUnset}, nil
 }
 
 // IsSet reports whether a key was found at all.
-func (k APIKey) IsSet() bool { return k.Source != KeyUnset }
+func (k APIKey) IsSet() bool { return k.Source != SourceUnset }
 
 // maskPrefix stands for everything that is withheld. Its width is fixed, so a
 // masked key does not disclose how long the key is.
@@ -154,4 +162,55 @@ func (k APIKey) Masked() string {
 		return maskPrefix
 	}
 	return maskPrefix + string(r[len(r)-maskTail:])
+}
+
+// DefaultUSDPerCredit is what one kie.ai credit is taken to cost in US dollars
+// when the configuration file says nothing. kie.ai does not answer with a rate,
+// so every dollar figure shown is an estimate made with this or the configured
+// rate.
+const DefaultUSDPerCredit = 0.005
+
+// USDPerCredit is a resolved conversion rate together with where it was found.
+type USDPerCredit struct {
+	Value  float64
+	Source Source
+}
+
+// ResolveUSDPerCredit reports the rate that is in effect: the one in the
+// configuration file, or the default where the file has none. A rate in the
+// file is held to the same rule as one given to ParseUSDPerCredit, since the
+// file can be edited by hand.
+func ResolveUSDPerCredit(configPath string) (USDPerCredit, error) {
+	s, err := Load(configPath)
+	if err != nil {
+		return USDPerCredit{}, err
+	}
+	if s.USDPerCredit == nil {
+		return USDPerCredit{Value: DefaultUSDPerCredit, Source: SourceDefault}, nil
+	}
+	if err := checkUSDPerCredit(*s.USDPerCredit); err != nil {
+		return USDPerCredit{}, fmt.Errorf("%s: %w", configPath, err)
+	}
+	return USDPerCredit{Value: *s.USDPerCredit, Source: SourceFile}, nil
+}
+
+// ParseUSDPerCredit reads a rate as given on the command line.
+func ParseUSDPerCredit(text string) (float64, error) {
+	v, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return 0, fmt.Errorf("usd_per_credit must be a number, got %q", text)
+	}
+	if err := checkUSDPerCredit(v); err != nil {
+		return 0, err
+	}
+	return v, nil
+}
+
+// checkUSDPerCredit refuses a rate no credit can cost: nothing, less than
+// nothing, or not a finite number.
+func checkUSDPerCredit(v float64) error {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
+		return fmt.Errorf("usd_per_credit must be a positive finite number, got %v", v)
+	}
+	return nil
 }
