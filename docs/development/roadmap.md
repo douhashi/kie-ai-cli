@@ -34,3 +34,4 @@
 - [x] 上流のプロパティ名に含まれる末尾空白を扱う。 → #60
 - [x] separate-vocals の stem_name を必須から外す。 → #69
 - [x] ElevenLabs TTS の voice 既定値が適用されない。 → #70
+- [x] separate-vocals のアップロード音声分離を実測する。kie.ai が audio_url を読まず実現不能のため補正しない。 → #79
