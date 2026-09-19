@@ -123,6 +123,11 @@ ledger, and reports at the end how many of its rows may already be out of date.
 A task is `submitted`, `running`, `succeeded` or `failed`: what kie.ai answers
 is normalised to those four.
 
+What kie.ai says a task cost is written down with it, and shown in the column
+before the result (`creditsConsumed` in `--json`). A task no answer has said the
+cost of shows `-` (`null`), which is not the same as `0`: kie.ai answers `0` for
+a failure it did not charge for.
+
 Every model in the catalog is followed through the one Market query endpoint.
 A model whose query endpoint this build cannot read -- which only a hand-made
 catalog can hold -- is named by task ID and endpoint and its row is left exactly

@@ -4,6 +4,8 @@ package cli_test
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -26,7 +28,8 @@ const (
 
 // V1, V2: a task that produces files and one that answers with text are
 // followed to the end by the same command, and what kie.ai said about each --
-// the state and what it produced -- is in the ledger when it returns.
+// the state, what it produced and what it cost -- is in the ledger when it
+// returns.
 //
 // Every run spends real credits on two tasks kie.ai has no way to cancel, so
 // the two models are one test and each is given the one required field.
@@ -61,6 +64,12 @@ func TestTaskRefreshFollowsRealTasksToTheEnd(t *testing.T) {
 	if urls := recorded(t, layout, lyrics).ResultURLs; len(urls) != 0 {
 		t.Errorf("the lyrics task recorded %v, want no URLs from a task that returns none", urls)
 	}
+	// What each task cost is what kie.ai answers now, whichever kind of
+	// model it was; an answer that carries no figure leaves no record
+	// rather than a 0.
+	for _, taskID := range []string{market, lyrics} {
+		assertCreditsAsAnswered(t, key, taskID, recorded(t, layout, taskID).CreditsConsumed)
+	}
 
 	t.Logf("credits after: %s", balance(t, key))
 }
@@ -86,6 +95,56 @@ func TestTaskRefreshReportsATaskTheRealAPIDoesNotKnow(t *testing.T) {
 		t.Errorf("status = %q, want the row left as it was", task.Status)
 	}
 	t.Logf("kie task refresh on an unknown task -> code %d, stderr %q", got.code, strings.TrimRight(got.stderr, "\n"))
+}
+
+// assertCreditsAsAnswered asks the Market endpoint about taskID directly --
+// not through the decoder under test -- and checks that the ledger holds the
+// creditsConsumed it answers with, or no record where it answers with none.
+func assertCreditsAsAnswered(t *testing.T, key, taskID string, got *float64) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+		"https://api.kie.ai/api/v1/jobs/recordInfo?"+url.Values{"taskId": {taskID}}.Encode(), nil)
+	if err != nil {
+		t.Fatalf("build the query: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("query %s: %v", taskID, err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	var answer struct {
+		Data struct {
+			CreditsConsumed json.RawMessage `json:"creditsConsumed"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&answer); err != nil {
+		t.Fatalf("query %s: the answer is not JSON: %v", taskID, err)
+	}
+	raw := answer.Data.CreditsConsumed
+	t.Logf("%s: kie.ai answers creditsConsumed %s, the ledger holds %v", taskID, raw, deref(got))
+
+	if len(raw) == 0 || string(raw) == "null" {
+		if got != nil {
+			t.Errorf("%s: recorded %v, want no record from an answer that carries none", taskID, *got)
+		}
+		return
+	}
+	var want float64
+	if err := json.Unmarshal(raw, &want); err != nil {
+		t.Fatalf("%s: creditsConsumed %s is not a number", taskID, raw)
+	}
+	if got == nil || *got != want {
+		t.Errorf("%s: recorded %v, want the %v kie.ai answers with", taskID, deref(got), want)
+	}
+}
+
+// deref renders a figure that may be absent, for a log line.
+func deref(v *float64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // submit runs one task and returns the id kie.ai gave it.
@@ -125,7 +184,9 @@ func follow(t *testing.T, key string) map[string]listedTask {
 		if err := json.Unmarshal([]byte(got.stdout), &refreshed); err != nil {
 			t.Fatalf("task refresh: stdout is not JSON (%v):\n%s", err, got.stdout)
 		}
-		t.Logf("refresh %d: %+v", attempt, refreshed)
+		// The printed rows, not the parsed ones: what a task is said to
+		// have cost while it is still running is part of what this logs.
+		t.Logf("refresh %d: %s", attempt, got.stdout)
 
 		if len(refreshed) == 0 {
 			break

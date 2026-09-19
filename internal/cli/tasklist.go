@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -210,14 +211,29 @@ func record(ctx context.Context, l *ledger.Ledger, task ledger.Task, a answer) (
 	if a.err != nil {
 		return task, a.err
 	}
-	if a.state.Status == task.Status && slices.Equal(a.state.ResultURLs, task.ResultURLs) && a.state.Error == task.Error {
+	if a.state.Status == task.Status && slices.Equal(a.state.ResultURLs, task.ResultURLs) && a.state.Error == task.Error &&
+		sameCredits(a.state.CreditsConsumed, task.CreditsConsumed) {
 		return task, nil
 	}
-	result := ledger.Result{Status: a.state.Status, ResultURLs: a.state.ResultURLs, Error: a.state.Error}
+	result := ledger.Result{
+		Status:          a.state.Status,
+		ResultURLs:      a.state.ResultURLs,
+		Error:           a.state.Error,
+		CreditsConsumed: a.state.CreditsConsumed,
+	}
 	if err := l.Update(ctx, task.TaskID, result); err != nil {
 		return task, err
 	}
 	return l.Get(ctx, task.TaskID)
+}
+
+// sameCredits reports whether two figures say the same thing, no record being
+// the same only as no record.
+func sameCredits(a, b *float64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // taskSummary is the JSON contract of task list and task refresh.
@@ -232,8 +248,11 @@ type taskSummary struct {
 	// SavedPaths is where what the task produced is on this machine, empty
 	// until task download has fetched it.
 	SavedPaths []string `json:"savedPaths"`
-	CreatedAt  string   `json:"createdAt"`
-	UpdatedAt  string   `json:"updatedAt"`
+	// CreditsConsumed is null where nothing has said what the task cost,
+	// so that a consumer cannot read "no record" as "cost nothing".
+	CreditsConsumed *float64 `json:"creditsConsumed"`
+	CreatedAt       string   `json:"createdAt"`
+	UpdatedAt       string   `json:"updatedAt"`
 }
 
 // writeTasks prints a listing. Both commands use it: refresh answers with the
@@ -244,14 +263,15 @@ func writeTasks(e *env, tasks []ledger.Task) error {
 		summaries := make([]taskSummary, 0, len(tasks))
 		for _, task := range tasks {
 			summaries = append(summaries, taskSummary{
-				TaskID:     task.TaskID,
-				ModelID:    task.ModelID,
-				Status:     task.Status,
-				ResultURLs: task.ResultURLs,
-				Error:      task.Error,
-				SavedPaths: task.SavedPaths,
-				CreatedAt:  task.CreatedAt.Format(time.RFC3339),
-				UpdatedAt:  task.UpdatedAt.Format(time.RFC3339),
+				TaskID:          task.TaskID,
+				ModelID:         task.ModelID,
+				Status:          task.Status,
+				ResultURLs:      task.ResultURLs,
+				Error:           task.Error,
+				SavedPaths:      task.SavedPaths,
+				CreditsConsumed: task.CreditsConsumed,
+				CreatedAt:       task.CreatedAt.Format(time.RFC3339),
+				UpdatedAt:       task.UpdatedAt.Format(time.RFC3339),
 			})
 		}
 		return writeJSON(e.stdout, summaries)
@@ -262,11 +282,20 @@ func writeTasks(e *env, tasks []ledger.Task) error {
 func writeTaskRows(w io.Writer, tasks []ledger.Task) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, task := range tasks {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			task.TaskID, task.Status, task.ModelID,
-			task.CreatedAt.Format(time.RFC3339), orDash(detail(task)))
+			task.CreatedAt.Format(time.RFC3339), orDash(creditsText(task.CreditsConsumed)), orDash(detail(task)))
 	}
 	return tw.Flush()
+}
+
+// creditsText renders what a task cost as kie.ai reported it, with no more
+// digits than the figure has, and nothing where there is no record.
+func creditsText(v *float64) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*v, 'f', -1, 64)
 }
 
 // detail is the last column: what the task produced, or why it produced

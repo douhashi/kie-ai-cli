@@ -37,11 +37,15 @@ var Statuses = []string{StatusSubmitted, StatusRunning, StatusSucceeded, StatusF
 var Unfinished = []string{StatusSubmitted, StatusRunning}
 
 // TaskState is what one query said about a task: where it has got to, what it
-// has produced, and why it will not produce anything.
+// has produced, why it will not produce anything, and what it has cost.
 type TaskState struct {
 	Status     string
 	ResultURLs []string
 	Error      string
+	// CreditsConsumed is what kie.ai says the task has cost, nil when the
+	// answer did not say. Nil is not zero: a failure kie.ai did not charge
+	// for answers with 0, and the two must not read the same.
+	CreditsConsumed *float64
 }
 
 // decoder reads the data field of one endpoint's answer.
@@ -103,6 +107,8 @@ type marketAnswer struct {
 	ResultJSON string `json:"resultJson"`
 	FailCode   scalar `json:"failCode"`
 	FailMsg    string `json:"failMsg"`
+	// CreditsConsumed is left nil by both null and a missing field.
+	CreditsConsumed *float64 `json:"creditsConsumed"`
 }
 
 func decodeMarket(raw json.RawMessage) (TaskState, error) {
@@ -118,7 +124,12 @@ func decodeMarket(raw json.RawMessage) (TaskState, error) {
 	if err != nil {
 		return TaskState{}, err
 	}
-	return TaskState{Status: status, ResultURLs: urls, Error: reason(string(answer.FailCode), answer.FailMsg)}, nil
+	return TaskState{
+		Status:          status,
+		ResultURLs:      urls,
+		Error:           reason(string(answer.FailCode), answer.FailMsg),
+		CreditsConsumed: answer.CreditsConsumed,
+	}, nil
 }
 
 // marketResultURLs reads the URLs out of the document the resultJson string

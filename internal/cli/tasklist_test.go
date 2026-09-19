@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,6 +39,28 @@ func add(t *testing.T, layout paths.Layout, taskID, modelID, status string) {
 	if err := l.Add(t.Context(), taskID, modelID, status, nil); err != nil {
 		t.Fatalf("ledger.Add(%s): %v", taskID, err)
 	}
+}
+
+// costed records one finished task and what kie.ai said it cost, the way task
+// refresh would have.
+func costed(t *testing.T, layout paths.Layout, taskID string, consumed *float64) {
+	t.Helper()
+	add(t, layout, taskID, marketModel, kie.StatusSubmitted)
+	l, err := ledger.Open(t.Context(), layout.Ledger)
+	if err != nil {
+		t.Fatalf("ledger.Open: %v", err)
+	}
+	defer func() { _ = l.Close() }()
+	result := ledger.Result{Status: kie.StatusSucceeded, CreditsConsumed: consumed}
+	if err := l.Update(t.Context(), taskID, result); err != nil {
+		t.Fatalf("ledger.Update(%s): %v", taskID, err)
+	}
+}
+
+// credits is the address of a consumed-credit figure, which is how a recorded
+// figure is told apart from no record at all.
+func credits(v float64) *float64 {
+	return &v
 }
 
 // queryStub answers task queries with a body chosen by path, and records what
@@ -199,18 +222,45 @@ func TestTaskListRefusesAnUnknownStatus(t *testing.T) {
 	}
 }
 
+// V4: the JSON contract gains creditsConsumed and nothing else changes. A task
+// no answer has said the cost of is null there, so that a consumer cannot read
+// "no record" as "cost nothing"; zero is zero.
 func TestTaskListAsJSON(t *testing.T) {
 	layout := isolate(t)
-	add(t, layout, "task-1", marketModel, kie.StatusSubmitted)
+	add(t, layout, "unrecorded", marketModel, kie.StatusSubmitted)
+	costed(t, layout, "free", credits(0))
+	costed(t, layout, "paid", credits(0.4))
 
 	got := run(t, "task", "list", "--json")
 	if got.code != 0 {
 		t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
 	}
+	var raw []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(got.stdout), &raw); err != nil {
+		t.Fatalf("stdout is not JSON (%v):\n%s", err, got.stdout)
+	}
+	wantKeys := []string{"createdAt", "creditsConsumed", "modelId", "resultUrls", "savedPaths", "status", "taskId", "updatedAt"}
+	wantCredits := map[string]string{"unrecorded": "null", "free": "0", "paid": "0.4"}
+	if len(raw) != len(wantCredits) {
+		t.Fatalf("listed %d tasks, want %d", len(raw), len(wantCredits))
+	}
+	for _, row := range raw {
+		keys := slices.Sorted(maps.Keys(row))
+		if !slices.Equal(keys, wantKeys) {
+			t.Errorf("keys = %v, want %v", keys, wantKeys)
+		}
+		var id string
+		if err := json.Unmarshal(row["taskId"], &id); err != nil {
+			t.Fatalf("taskId is not a string: %s", row["taskId"])
+		}
+		if got := string(row["creditsConsumed"]); got != wantCredits[id] {
+			t.Errorf("%s: creditsConsumed = %s, want %s", id, got, wantCredits[id])
+		}
+	}
+
 	var listed []struct {
 		TaskID     string   `json:"taskId"`
 		ModelID    string   `json:"modelId"`
-		Status     string   `json:"status"`
 		ResultURLs []string `json:"resultUrls"`
 		SavedPaths []string `json:"savedPaths"`
 		CreatedAt  string   `json:"createdAt"`
@@ -218,20 +268,44 @@ func TestTaskListAsJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(got.stdout), &listed); err != nil {
 		t.Fatalf("stdout is not JSON (%v):\n%s", err, got.stdout)
 	}
-	if len(listed) != 1 {
-		t.Fatalf("listed %d tasks, want 1", len(listed))
+	unrecorded := listed[len(listed)-1]
+	if unrecorded.TaskID != "unrecorded" || unrecorded.ModelID != marketModel {
+		t.Errorf("listed = %+v, want the recorded task", unrecorded)
 	}
-	if listed[0].TaskID != "task-1" || listed[0].ModelID != marketModel {
-		t.Errorf("listed = %+v, want the recorded task", listed[0])
-	}
-	if listed[0].ResultURLs == nil {
+	if unrecorded.ResultURLs == nil {
 		t.Error("resultUrls is null; a task that has produced nothing has produced an empty list")
 	}
-	if listed[0].SavedPaths == nil {
+	if unrecorded.SavedPaths == nil {
 		t.Error("savedPaths is null; a task nothing has saved has an empty list of paths")
 	}
-	if _, err := time.Parse(time.RFC3339, listed[0].CreatedAt); err != nil {
-		t.Errorf("createdAt = %q, want a timestamp: %v", listed[0].CreatedAt, err)
+	if _, err := time.Parse(time.RFC3339, unrecorded.CreatedAt); err != nil {
+		t.Errorf("createdAt = %q, want a timestamp: %v", unrecorded.CreatedAt, err)
+	}
+}
+
+// The table shows what a task cost in the column before the detail, and a dash
+// where nothing has said -- never a 0 that nobody reported.
+func TestTaskListShowsWhatEachTaskCost(t *testing.T) {
+	layout := isolate(t)
+	add(t, layout, "unrecorded", marketModel, kie.StatusSubmitted)
+	costed(t, layout, "free", credits(0))
+	costed(t, layout, "paid", credits(18))
+	costed(t, layout, "fraction", credits(0.4))
+
+	got := run(t, "task", "list")
+	if got.code != 0 {
+		t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
+	}
+	want := map[string]string{"unrecorded": "-", "free": "0", "paid": "18", "fraction": "0.4"}
+	for _, line := range strings.Split(strings.TrimRight(got.stdout, "\n"), "\n") {
+		// id, status, model, created, credits, detail
+		fields := strings.Fields(line)
+		if len(fields) != 6 {
+			t.Fatalf("row %q has %d columns, want 6", line, len(fields))
+		}
+		if fields[4] != want[fields[0]] {
+			t.Errorf("%s: credits column = %q, want %q", fields[0], fields[4], want[fields[0]])
+		}
 	}
 }
 
@@ -302,7 +376,7 @@ func TestTaskRefreshRecordsWhatKieSays(t *testing.T) {
 	t.Setenv(config.APIKeyEnv, secret)
 	stub := stubQueries(t, map[string]string{
 		"/api/v1/jobs/recordInfo?taskId=task-1": `{"code":200,"msg":"success","data":{"state":"success",
-			"resultJson":"{\"resultUrls\":[\"https://file.kie.ai/a.jpg\"]}"}}`,
+			"resultJson":"{\"resultUrls\":[\"https://file.kie.ai/a.jpg\"]}","creditsConsumed":18.0}}`,
 		"/api/v1/jobs/recordInfo?taskId=task-2": `{"code":200,"msg":"success","data":{"state":"success",
 			"resultJson":"{\"text\":\"[Verse]\"}"}}`,
 	})
@@ -330,6 +404,9 @@ func TestTaskRefreshRecordsWhatKieSays(t *testing.T) {
 	if len(market.ResultURLs) != 1 || market.ResultURLs[0] != "https://file.kie.ai/a.jpg" {
 		t.Errorf("resultUrls = %v, want the URL kie.ai answered with", market.ResultURLs)
 	}
+	if market.CreditsConsumed == nil || *market.CreditsConsumed != 18 {
+		t.Errorf("creditsConsumed = %v, want the 18 kie.ai answered with", market.CreditsConsumed)
+	}
 	// AC2 of the lyrics kind: a task that answers with the text itself
 	// finishes with nothing to download, which is a success.
 	lyrics := recorded(t, layout, "task-2")
@@ -338,6 +415,11 @@ func TestTaskRefreshRecordsWhatKieSays(t *testing.T) {
 	}
 	if len(lyrics.ResultURLs) != 0 {
 		t.Errorf("resultUrls = %v, want none for a task that returns no files", lyrics.ResultURLs)
+	}
+	// An answer that did not say what the task cost leaves no record of
+	// it, rather than a 0 nobody reported.
+	if lyrics.CreditsConsumed != nil {
+		t.Errorf("creditsConsumed = %v, want no record from an answer that carried none", *lyrics.CreditsConsumed)
 	}
 	if !strings.Contains(got.stdout, "task-1") || !strings.Contains(got.stdout, "task-2") {
 		t.Errorf("refresh does not print what it found:\n%s", got.stdout)
@@ -457,6 +539,33 @@ func TestTaskRefreshLeavesUnchangedRowsAlone(t *testing.T) {
 	after := recorded(t, layout, "task-1")
 	if !after.UpdatedAt.Equal(before.UpdatedAt) {
 		t.Errorf("updated_at moved from %v to %v on an answer that said nothing new", before.UpdatedAt, after.UpdatedAt)
+	}
+}
+
+// A cost is news on its own: a task still running whose answer now says what
+// it has cost is written down even though nothing else about it moved.
+func TestTaskRefreshRecordsACostThatChangedAlone(t *testing.T) {
+	layout := isolate(t)
+	t.Setenv(config.APIKeyEnv, secret)
+	stubQueries(t, map[string]string{
+		"/api/v1/jobs/recordInfo": `{"code":200,"msg":"success","data":{"state":"generating","creditsConsumed":6}}`,
+	})
+	add(t, layout, "task-1", marketModel, kie.StatusRunning)
+
+	if got := run(t, "task", "refresh"); got.code != 0 {
+		t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
+	}
+	after := recorded(t, layout, "task-1")
+	if after.CreditsConsumed == nil || *after.CreditsConsumed != 6 {
+		t.Errorf("creditsConsumed = %v, want the 6 kie.ai answered with", after.CreditsConsumed)
+	}
+
+	// The same figure again is nothing new, and updated_at stays put.
+	if got := run(t, "task", "refresh"); got.code != 0 {
+		t.Fatalf("code = %d, stderr %q", got.code, got.stderr)
+	}
+	if again := recorded(t, layout, "task-1"); !again.UpdatedAt.Equal(after.UpdatedAt) {
+		t.Errorf("updated_at moved from %v to %v on an answer that said nothing new", after.UpdatedAt, again.UpdatedAt)
 	}
 }
 

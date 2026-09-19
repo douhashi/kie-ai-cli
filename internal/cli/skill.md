@@ -77,6 +77,9 @@ A task is `submitted`, `running`, `succeeded` or `failed`. `task list` reports h
 many of its rows may be out of date, and `task refresh` is what brings them up to
 date.
 
+`creditsConsumed` is what kie.ai said the task cost. `null` means no answer has
+said, not that it was free; `0` is a task kie.ai did not charge for.
+
 **Do not sit in a polling loop.** Generation takes minutes, and sleeping in a
 shell spends the user's time and your context on nothing. Refresh once, tell the
 user the task ID and what it says, and stop there. Refresh again when they ask.
