@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 )
@@ -284,6 +285,60 @@ func TestMigrateRejectsNewerSchema(t *testing.T) {
 	}
 }
 
+// Commands run as separate processes, so the first ones on a machine can all
+// find the ledger empty at once. Every one of them has to open it, and the
+// schema has to be applied exactly once between them.
+func TestOpenEmptyLedgerConcurrently(t *testing.T) {
+	const rounds, openers = 10, 4
+	for round := range rounds {
+		path := filepath.Join(t.TempDir(), "ledger.db")
+
+		var wg sync.WaitGroup
+		errs := make([]error, openers)
+		for i := range openers {
+			wg.Go(func() {
+				l, err := Open(context.Background(), path)
+				if err == nil {
+					err = l.Close()
+				}
+				errs[i] = err
+			})
+		}
+		wg.Wait()
+
+		if err := errors.Join(errs...); err != nil {
+			t.Fatalf("round %d: Open() error: %v", round, err)
+		}
+		if v := schemaVersion(t, open(t, path)); v != len(migrations) {
+			t.Fatalf("round %d: user_version = %d, want %d", round, v, len(migrations))
+		}
+	}
+}
+
+// What the concurrent open rests on in the driver: a ledger transaction holds
+// the write lock from BEGIN, before it has run a statement, and a lock held
+// elsewhere is reported as busy.
+func TestTransactionTakesTheWriteLockAtBegin(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "ledger.db")
+
+	tx, err := open(t, path).db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx() error: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+
+	// No busy_timeout, so the contention is reported rather than waited out.
+	other, err := sql.Open("sqlite", "file:"+path+"?_txlock=immediate")
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = other.Close() })
+	if _, err := other.BeginTx(ctx, nil); !isBusy(err) {
+		t.Fatalf("second BeginTx() error = %v, want SQLITE_BUSY", err)
+	}
+}
+
 // A task submitted twice with the same values must read back the same way,
 // whatever order the fields arrived in.
 func TestAddNormalisesInput(t *testing.T) {
@@ -411,7 +466,7 @@ func TestOpenAppliesConnectionPragmas(t *testing.T) {
 func TestDSNEscapesThePath(t *testing.T) {
 	got := dsn("/tmp/a b?c/ledger.db")
 	want := "file:///tmp/a%20b%3Fc/ledger.db" +
-		"?_pragma=busy_timeout%285000%29&_pragma=journal_mode%28WAL%29&_pragma=foreign_keys%281%29"
+		"?_pragma=busy_timeout%285000%29&_pragma=foreign_keys%281%29&_txlock=immediate"
 	if got != want {
 		t.Errorf("dsn() = %s, want %s", got, want)
 	}
