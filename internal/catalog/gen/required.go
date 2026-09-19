@@ -105,12 +105,10 @@ var measuredInputRequired = map[string][][]string{
 	"bytedance/seedance-2":   seedance2Alternatives,
 	"bytedance/seedance-2-5": seedance2Alternatives,
 	// Its page spells the property "reference_video_urls " with a trailing
-	// blank, which is not a name anyone would send, so it is left out until
-	// the blank is dealt with upstream of this table (#60).
-	"bytedance/seedance-2-fast": {
-		{"prompt"}, {"first_frame_url"}, {"last_frame_url"},
-		{"reference_image_urls"}, {"reference_audio_urls"},
-	},
+	// blank. Sent alone under that name it drew the empty-input 422, and under
+	// the trimmed name it created a task, which then failed fetching the
+	// unreachable video; the parser trims the name to match. #60, 2026-09-19.
+	"bytedance/seedance-2-fast": seedance2Alternatives,
 	"bytedance/seedance-2-mini": seedance2Alternatives,
 	// Both took an empty input object and answered with a taskId, so there
 	// is nothing a caller has to supply. Each task then failed upstream, one

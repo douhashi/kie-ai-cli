@@ -2,9 +2,11 @@ package openapi_test
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -123,6 +125,25 @@ func TestParseDropsVendorExtensions(t *testing.T) {
 	}
 }
 
+// Some kie.ai pages spell a property with a trailing blank. kie.ai reads the
+// trimmed name and ignores the spelled one (#60), so the blank is dropped from
+// both the property and the required list.
+func TestParseTrimsBlanksAroundPropertyNames(t *testing.T) {
+	op := parseFixture(t, "quirks", "spaced-names.md")
+
+	input, err := op.RequestProperty("input")
+	if err != nil {
+		t.Fatalf("RequestProperty(input): %v", err)
+	}
+	props := input["properties"].(map[string]any)
+	if got := slices.Sorted(maps.Keys(props)); !slices.Equal(got, []string{"image_urls", "prompt"}) {
+		t.Errorf("properties = %q, want [image_urls prompt]", got)
+	}
+	if got := input["required"]; !reflect.DeepEqual(got, []any{"image_urls"}) {
+		t.Errorf("required = %q, want [image_urls]", got)
+	}
+}
+
 func TestParseMarketQueryPage(t *testing.T) {
 	op := parseFixture(t, "pages", "market", "common", "get-task-detail.md")
 
@@ -155,6 +176,8 @@ func TestParseRejectsUnexpectedPages(t *testing.T) {
 		"no OpenAPI block": {"no-yaml.md", "OpenAPI"},
 		"two paths":        {"two-paths.md", "paths"},
 		"dangling $ref":    {"dangling-ref.md", "nsfw_checker"},
+		// Keeping either would silently drop the other's schema.
+		"names equal once trimmed": {"colliding-names.md", "image_urls"},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {

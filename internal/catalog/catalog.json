@@ -2478,6 +2478,11 @@
           },
           {
             "required": [
+              "reference_video_urls"
+            ]
+          },
+          {
+            "required": [
               "reference_audio_urls"
             ]
           }
@@ -2561,7 +2566,7 @@
             "maxItems": 9,
             "type": "array"
           },
-          "reference_video_urls ": {
+          "reference_video_urls": {
             "description": "Enter a list of video URLs or asset://{assetId} (for example: asset://asset-20260404242101-76djj).\nSingle video requirements:\nVideo format: mp4, mov.\nResolution: 480p, 720p\nDuration: Single video duration [2, 15] s, maximum 3 reference videos, total duration of all videos not exceeding 15 seconds.\nDimensions:\nAspect ratio (width/height): [0.4, 2.5]\nWidth/height (px): [300, 6000]\nTotal pixels: [640×640=409600, 834×1112=927408], i.e., the product of width and height must meet the range requirement of [409600, 927408].\nSize: Single video not exceeding 50 MB.\nFrame rate (FPS): [24, 60]",
             "items": {
               "format": "uri",
@@ -7570,7 +7575,7 @@
             "minimum": 3,
             "type": "integer"
           },
-          "image_urls ": {
+          "image_urls": {
             "description": "First-frame image URL list. Exactly one image is required.\n\nImage constraints:\nFormat: JPEG, JPG, PNG, WEBP.\nResolution: Width and height must be at least 300 pixels.\nAspect ratio: 1:2.5 to 2.5:1.\nFile size: Up to 10 MB.",
             "items": {
               "type": "string"
@@ -7607,7 +7612,7 @@
           }
         },
         "required": [
-          "image_urls "
+          "image_urls"
         ],
         "type": "object"
       }
@@ -7820,7 +7825,7 @@
             "maxLength": 5000,
             "type": "string"
           },
-          "reference_image ": {
+          "reference_image": {
             "description": "Optional reference image URL list (0–5).\nImage requirements:\nFormat: JPEG, JPG, PNG, WEBP.\nResolution: both width and height must be at least 300 px.\nAspect ratio: 1:2.5–2.5:1.\nFile size: up to 10 MB.",
             "items": {
               "type": "string"
