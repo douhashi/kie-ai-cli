@@ -128,6 +128,13 @@ before the result (`creditsConsumed` in `--json`). A task no answer has said the
 cost of shows `-` (`null`), which is not the same as `0`: kie.ai answers `0` for
 a failure it did not charge for.
 
+Next to the credits is an estimate in US dollars, such as `~$0.09`
+(`estimatedUsd` in `--json`, `null` wherever the credits are). kie.ai does not
+say what a credit costs, so the estimate is the credits times a rate of your
+own: $0.005 per credit unless `kie config set usd_per_credit <value>` sets
+another. It is worked out each time a listing is printed and never stored, so a
+new rate reprices every task, the old ones included.
+
 Every model in the catalog is followed through the one Market query endpoint.
 A model whose query endpoint this build cannot read -- which only a hand-made
 catalog can hold -- is named by task ID and endpoint and its row is left exactly
@@ -228,7 +235,9 @@ from the configuration file otherwise, so a key can be given for a single
 invocation without being stored. `kie config set api_key <value>` writes the
 file, which is created with mode `0600` and never left more permissive than
 that. `kie config show` reports which key is in effect — masked to its last four
-characters — where it came from, and where each of those files lives.
+characters — where it came from, the rate credits are converted to US dollars at
+and whether it is the default or the file's, and where each of those files
+lives.
 
 ## Build
 

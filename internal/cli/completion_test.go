@@ -132,6 +132,8 @@ func TestCompletionShowCoversEveryCommand(t *testing.T) {
 				"catalog", "update", "config", "credits", "file", "upload",
 				"model", "list", "show", "task", "run", "completion",
 				"skill", "install",
+				// The keys config set accepts.
+				"api_key", "usd_per_credit",
 				// The flags, which come from the commands themselves.
 				"--json", "--category", "--vendor", "--input", "--scope",
 				// The axes, asked for rather than baked in.

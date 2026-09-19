@@ -26,8 +26,8 @@ func TestResolvedKeyAuthenticates(t *testing.T) {
 		t.Setenv(config.APIKeyEnv, key)
 
 		resolved := resolve(t, path)
-		if resolved.Source != config.KeyFromEnv {
-			t.Fatalf("source = %q, want %q", resolved.Source, config.KeyFromEnv)
+		if resolved.Source != config.SourceEnv {
+			t.Fatalf("source = %q, want %q", resolved.Source, config.SourceEnv)
 		}
 		authenticate(t, resolved)
 	})
@@ -40,8 +40,8 @@ func TestResolvedKeyAuthenticates(t *testing.T) {
 		}
 
 		resolved := resolve(t, path)
-		if resolved.Source != config.KeyFromFile {
-			t.Fatalf("source = %q, want %q", resolved.Source, config.KeyFromFile)
+		if resolved.Source != config.SourceFile {
+			t.Fatalf("source = %q, want %q", resolved.Source, config.SourceFile)
 		}
 		authenticate(t, resolved)
 	})

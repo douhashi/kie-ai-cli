@@ -21,7 +21,8 @@ task it sent, because kie.ai has no endpoint that lists them.
 - The binary is installed as `{{.Program}}` or as `{{.Full}}`. If neither is on the PATH,
   say so rather than installing anything.
 - `{{.Program}} config show` reports whether an API key is in effect and where it came
-  from; `{{.Program}} credits show` reports the balance.
+  from, and the rate credits are converted to US dollars at; `{{.Program}} credits show`
+  reports the balance.
 - Add `--json` to any command whose output you are going to read; the plain
   output is laid out for a person. Errors are plain text on stderr whatever the
   format, and the exit code tells the kinds apart: 2 is a mistake in how the
@@ -79,6 +80,8 @@ date.
 
 `creditsConsumed` is what kie.ai said the task cost. `null` means no answer has
 said, not that it was free; `0` is a task kie.ai did not charge for.
+`estimatedUsd` is that figure times the rate in `config show` -- an estimate,
+not a charge kie.ai reported -- and `null` wherever `creditsConsumed` is.
 
 **Do not sit in a polling loop.** Generation takes minutes, and sleeping in a
 shell spends the user's time and your context on nothing. Refresh once, tell the
