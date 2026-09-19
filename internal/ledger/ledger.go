@@ -18,7 +18,8 @@ import (
 	"time"
 
 	"github.com/douhashi/kie-ai-cli/internal/kie"
-	_ "modernc.org/sqlite" // registers the cgo-free "sqlite" driver
+	"modernc.org/sqlite" // the cgo-free driver; importing it registers "sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // ErrNotFound reports that the ledger holds no task with the given id.
@@ -28,6 +29,10 @@ var ErrNotFound = errors.New("task not found")
 // fixed rather than trimmed so that lexicographic order over the stored text
 // is chronological order, which is what ORDER BY relies on.
 const timeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+// busyTimeout is how long a command waits out another one holding the ledger
+// before it gives up.
+const busyTimeout = 5 * time.Second
 
 // columns lists the task columns in the order scanTask reads them.
 const columns = `task_id, model_id, input, status, result_urls, error, saved_paths, created_at, updated_at`
@@ -74,11 +79,45 @@ func Open(ctx context.Context, path string) (*Ledger, error) {
 	// would only add contention this process inflicts on itself.
 	db.SetMaxOpenConns(1)
 
+	if err := enableWAL(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("open ledger %s: enable WAL: %w", path, err)
+	}
 	if err := migrate(ctx, db, migrations); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("open ledger %s: %w", path, err)
 	}
 	return &Ledger{db: db}, nil
+}
+
+// enableWAL switches the ledger to WAL, which lets a reading command run while
+// another one writes.
+//
+// The switch is retried here rather than left to busy_timeout: it upgrades a
+// read lock to an exclusive one, and SQLite answers a contended upgrade with
+// SQLITE_BUSY at once instead of calling the busy handler, since waiting could
+// deadlock. Commands opening a fresh ledger together would otherwise fail
+// within a millisecond of each other.
+func enableWAL(ctx context.Context, db *sql.DB) error {
+	deadline := time.Now().Add(busyTimeout)
+	for {
+		_, err := db.ExecContext(ctx, "PRAGMA journal_mode = WAL")
+		if !isBusy(err) || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// isBusy reports whether err is SQLite finding the database locked by another
+// connection. The extended codes all keep SQLITE_BUSY in their low byte.
+func isBusy(err error) bool {
+	var e *sqlite.Error
+	return errors.As(err, &e) && e.Code()&0xff == sqlite3.SQLITE_BUSY
 }
 
 // Close releases the underlying database.
@@ -298,20 +337,26 @@ func parseTime(value string) (time.Time, error) {
 // The driver hands a "file:" DSN to sqlite3_open_v2 with SQLITE_OPEN_URI, so
 // the path is read as a URI and has to be escaped as one — url.URL does that,
 // including for a path holding '?' or '#'. Each _pragma value is run verbatim
-// as a PRAGMA on the new connection.
+// as a PRAGMA on the new connection. WAL is not among them: switching to it has
+// to be retried, which a failed connection cannot be (see enableWAL).
 func dsn(path string) string {
 	u := url.URL{
 		Scheme: "file",
 		Path:   uriPath(path),
-		RawQuery: url.Values{"_pragma": {
-			// Wait out another process's write instead of failing the command.
-			"busy_timeout(5000)",
-			// WAL lets a reading command run while another one writes.
-			"journal_mode(WAL)",
-			// Off by default and per-connection, so it belongs here rather
-			// than beside the first schema version that needs it.
-			"foreign_keys(1)",
-		}}.Encode(),
+		RawQuery: url.Values{
+			"_pragma": {
+				// Wait out another process's write instead of failing the command.
+				fmt.Sprintf("busy_timeout(%d)", busyTimeout.Milliseconds()),
+				// Off by default and per-connection, so it belongs here rather
+				// than beside the first schema version that needs it.
+				"foreign_keys(1)",
+			},
+			// Take the write lock when a transaction begins. A transaction
+			// that reads first and writes later has to upgrade its lock, and
+			// SQLite fails a contended upgrade at once rather than wait on
+			// busy_timeout.
+			"_txlock": {"immediate"},
+		}.Encode(),
 	}
 	return u.String()
 }
