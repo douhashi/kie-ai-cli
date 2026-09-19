@@ -30,8 +30,8 @@ func describedSchema() map[string]any {
 	}
 }
 
-// pinMeasured hands one test a disagreement table of its own. The real one is
-// empty since the Market move (#51), so each outcome is only reachable this way.
+// pinMeasured hands one test a measurement table of its own, so that each
+// outcome is reachable whatever the real table holds.
 func pinMeasured(t *testing.T, table map[modelProperty]bool) {
 	t.Helper()
 	original := measured
@@ -62,6 +62,43 @@ func TestCorrectRequiredLeavesWhatTheAPIAccepts(t *testing.T) {
 	}
 	if got, want := schema["required"], []any{"prompt"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("required = %v, want %v", got, want)
+	}
+}
+
+// Upstream may also list a property as required that kie.ai does without. The
+// measurement is the authority in that direction too, whatever the description
+// says, and the name is taken off the list wherever the walk reaches it (#69).
+func TestCorrectRequiredRemovesWhatTheAPIDoesWithout(t *testing.T) {
+	pinMeasured(t, map[modelProperty]bool{{"vendor/model", "stem_name"}: false})
+	schema := map[string]any{
+		"required": []any{"stem_name", "type"},
+		"properties": map[string]any{
+			"stem_name": map[string]any{"description": "Only used when `type` is `split_stem_advanced`."},
+			"type":      map[string]any{"description": "Separation type."},
+		},
+	}
+	if err := correctRequired("vendor/model", schema); err != nil {
+		t.Fatalf("correctRequired: %v", err)
+	}
+	if got, want := schema["required"], []any{"type"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("required = %v, want %v", got, want)
+	}
+}
+
+// Taking the only required name off must drop the list rather than leave an
+// empty one: the two mean the same, and an empty list would read as a schema
+// that states its requirements.
+func TestCorrectRequiredDropsARequiredListLeftEmpty(t *testing.T) {
+	pinMeasured(t, map[modelProperty]bool{{"vendor/model", "stem_name"}: false})
+	schema := map[string]any{
+		"required":   []any{"stem_name"},
+		"properties": map[string]any{"stem_name": map[string]any{}},
+	}
+	if err := correctRequired("vendor/model", schema); err != nil {
+		t.Fatalf("correctRequired: %v", err)
+	}
+	if _, ok := schema["required"]; ok {
+		t.Errorf("required = %v, want the key to be absent", schema["required"])
 	}
 }
 

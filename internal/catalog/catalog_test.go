@@ -282,18 +282,20 @@ func walkObjects(schema map[string]any, visit func(properties map[string]any, re
 }
 
 // AC3: kie.ai says in prose that some properties are needed on every request
-// while leaving them out of the required list. Each such disagreement is
-// settled by a request made against the real API and pinned in
-// internal/catalog/gen/required.go, so the committed catalog must hold, for
-// every model, either the corrected required list or the measurement saying
-// the endpoint takes the request without it.
+// while leaving them out of the required list, and lists others as required
+// that it does without. Each such disagreement is settled by a request made
+// against the real API and pinned in internal/catalog/gen/required.go, so the
+// committed catalog must hold, for every model, the required list the
+// measurement calls for, and must not leave out anything a description calls
+// for that nobody has measured.
 func TestCommittedCatalogAgreesWithTheMeasuredRequirements(t *testing.T) {
-	// Properties carrying the wording when this was written (#51). Listing
-	// them keeps the test from passing because the walk stopped reaching
-	// anything; the page itself lists each of them as required.
+	// Properties carrying the wording or a measurement when this was written
+	// (#51, #69). Listing them keeps the test from passing because the walk
+	// stopped reaching anything.
 	seen := map[string]bool{}
 	want := []string{
 		"ai-music-api/extend.audio_id",
+		"ai-music-api/separate-vocals.stem_name",
 		"veo-3-1.prompt",
 	}
 	for _, model := range committed(t).Models {
@@ -303,23 +305,24 @@ func TestCommittedCatalogAgreesWithTheMeasuredRequirements(t *testing.T) {
 				if !ok {
 					continue
 				}
-				description, _ := property["description"].(string)
-				if !gen.UnconditionallyRequired(description) {
-					continue
-				}
-				measured, pinned := gen.MeasuredRequired(model.ID, name)
 				path := model.ID + "." + name
-				seen[path] = true
 				// Where a request was made, its answer is the authority
-				// in both directions: the field is required exactly when
-				// kie.ai refused to do without it.
-				if pinned {
+				// in both directions, whatever the description says: the
+				// field is required exactly when kie.ai refused to do
+				// without it.
+				if measured, pinned := gen.MeasuredRequired(model.ID, name); pinned {
+					seen[path] = true
 					if required[name] != measured {
 						t.Errorf("%s: kie.ai refuses a request without it: %v, but the catalog requires it: %v",
 							path, measured, required[name])
 					}
 					continue
 				}
+				description, _ := property["description"].(string)
+				if !gen.UnconditionallyRequired(description) {
+					continue
+				}
+				seen[path] = true
 				if !required[name] {
 					t.Errorf("%s: described as required for every request, absent from required, and not measured", path)
 				}
@@ -328,7 +331,7 @@ func TestCommittedCatalogAgreesWithTheMeasuredRequirements(t *testing.T) {
 	}
 	for _, path := range want {
 		if !seen[path] {
-			t.Errorf("%s no longer carries the description the correction reads; the walk is not reaching it", path)
+			t.Errorf("%s no longer carries the description or the measurement the correction reads; the walk is not reaching it", path)
 		}
 	}
 }

@@ -1474,9 +1474,6 @@
             "type": "string"
           }
         },
-        "required": [
-          "stem_name"
-        ],
         "type": "object"
       }
     },
