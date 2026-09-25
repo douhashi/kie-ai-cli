@@ -123,6 +123,8 @@ pixverse-v6/transition	video	pixverse
 qwen/image-edit	image	qwen
 qwen/image-to-image	image	qwen
 qwen/text-to-image	image	qwen
+qwen2-1/image-to-image	image	qwen
+qwen2-1/text-to-image	image	qwen
 qwen2/image-edit	image	qwen
 qwen3/image-to-image	image	qwen
 qwen3/pro-image-to-image	image	qwen
